@@ -1,0 +1,24 @@
+BOT DE FIGURINHAS WHATSAPP
+
+Arquivos principais:
+- index.js
+- config.js
+- package.json
+
+Comandos:
+- /fig = foto -> figurinha estática
+- /gif = vídeo/GIF -> figurinha animada
+- /ajuda = mostra ajuda
+
+Limite: 10 comandos por usuário por dia.
+Autor das figurinhas: rk da miis
+
+PRIMEIRA EXECUÇÃO
+1. Abra o Prompt de Comando nesta pasta.
+2. Rode: npm install
+3. Rode: npm start
+4. O QR Code aparecerá no terminal.
+5. No WhatsApp: Dispositivos conectados -> Conectar dispositivo -> escaneie o QR.
+6. Depois de conectar, não apague a pasta auth_info_baileys.
+
+Para alterar o grupo de atualizações, edite config.js e troque COLE_AQUI_O_LINK_DO_GRUPO.
