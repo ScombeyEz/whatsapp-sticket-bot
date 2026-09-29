@@ -8,6 +8,7 @@ const ffmpeg = require("fluent-ffmpeg");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+const webpmux = require("node-webpmux");
 
 const app = express();
 app.use(express.json());
@@ -19,7 +20,8 @@ const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 const OWNER_NUMBER = process.env.OWNER_NUMBER;
 
-const GRAPH_URL = `https://graph.facebook.com/v23.0/${PHONE_NUMBER_ID}`;
+const GRAPH_URL =
+    `https://graph.facebook.com/v23.0/${PHONE_NUMBER_ID}`;
 
 const DAILY_LIMIT = 10;
 
@@ -53,7 +55,6 @@ const stats = {
 // FIGURINHAS
 // ============================================================
 
-// ID da mensagem do WhatsApp -> dados da figurinha
 const stickerMessages = new Map();
 
 const MAX_STORED_STICKERS = 1000;
@@ -63,9 +64,12 @@ const MAX_STORED_STICKERS = 1000;
 // ============================================================
 
 function getBrazilDate() {
-    return new Intl.DateTimeFormat("en-CA", {
-        timeZone: "America/Sao_Paulo"
-    }).format(new Date());
+    return new Intl.DateTimeFormat(
+        "en-CA",
+        {
+            timeZone: "America/Sao_Paulo"
+        }
+    ).format(new Date());
 }
 
 // ============================================================
@@ -98,7 +102,7 @@ function registerUser(userId) {
 }
 
 // ============================================================
-// REGISTRAR FIGURINHA CRIADA
+// REGISTRAR FIGURINHA
 // ============================================================
 
 function registerSticker(type) {
@@ -119,10 +123,14 @@ function registerSticker(type) {
 }
 
 // ============================================================
-// GUARDAR FIGURINHA
+// GUARDAR FIGURINHA NA MEMÓRIA
 // ============================================================
 
-function rememberSticker(messageId, mediaId, animated) {
+function rememberSticker(
+    messageId,
+    mediaId,
+    animated
+) {
     if (!messageId || !mediaId) {
         console.log(
             "[STICKER] Não foi possível salvar:",
@@ -136,11 +144,14 @@ function rememberSticker(messageId, mediaId, animated) {
         return;
     }
 
-    stickerMessages.set(messageId, {
-        mediaId,
-        animated: animated === true,
-        createdAt: Date.now()
-    });
+    stickerMessages.set(
+        messageId,
+        {
+            mediaId,
+            animated: animated === true,
+            createdAt: Date.now()
+        }
+    );
 
     console.log(
         "[STICKER] Figurinha salva na memória:",
@@ -152,12 +163,19 @@ function rememberSticker(messageId, mediaId, animated) {
         }
     );
 
-    if (stickerMessages.size > MAX_STORED_STICKERS) {
+    if (
+        stickerMessages.size >
+        MAX_STORED_STICKERS
+    ) {
         const firstKey =
-            stickerMessages.keys().next().value;
+            stickerMessages.keys()
+                .next()
+                .value;
 
         if (firstKey) {
-            stickerMessages.delete(firstKey);
+            stickerMessages.delete(
+                firstKey
+            );
         }
     }
 }
@@ -167,16 +185,21 @@ function rememberSticker(messageId, mediaId, animated) {
 // ============================================================
 
 function getUserData(userId) {
-    const today = getBrazilDate();
+    const today =
+        getBrazilDate();
 
     if (!users.has(userId)) {
-        users.set(userId, {
-            date: today,
-            commands: 0
-        });
+        users.set(
+            userId,
+            {
+                date: today,
+                commands: 0
+            }
+        );
     }
 
-    const user = users.get(userId);
+    const user =
+        users.get(userId);
 
     if (user.date !== today) {
         user.date = today;
@@ -187,13 +210,19 @@ function getUserData(userId) {
 }
 
 function canUseCommand(userId) {
-    if (unlimitedUsers.has(userId)) {
+    if (
+        unlimitedUsers.has(userId)
+    ) {
         return true;
     }
 
-    const user = getUserData(userId);
+    const user =
+        getUserData(userId);
 
-    if (user.commands >= DAILY_LIMIT) {
+    if (
+        user.commands >=
+        DAILY_LIMIT
+    ) {
         return false;
     }
 
@@ -206,21 +235,32 @@ function canUseCommand(userId) {
 // ENVIAR TEXTO
 // ============================================================
 
-async function sendText(to, text) {
+async function sendText(
+    to,
+    text
+) {
     await axios.post(
         `${GRAPH_URL}/messages`,
         {
-            messaging_product: "whatsapp",
+            messaging_product:
+                "whatsapp",
+
             to,
-            type: "text",
+
+            type:
+                "text",
+
             text: {
                 body: text
             }
         },
         {
             headers: {
-                Authorization: `Bearer ${WHATSAPP_TOKEN}`,
-                "Content-Type": "application/json"
+                Authorization:
+                    `Bearer ${WHATSAPP_TOKEN}`,
+
+                "Content-Type":
+                    "application/json"
             }
         }
     );
@@ -230,22 +270,27 @@ async function sendText(to, text) {
 // DOWNLOAD DE MÍDIA
 // ============================================================
 
-async function downloadMedia(mediaId) {
+async function downloadMedia(
+    mediaId
+) {
     console.log(
         "[MEDIA] Buscando informações da mídia:",
         mediaId
     );
 
-    const mediaInfo = await axios.get(
-        `https://graph.facebook.com/v23.0/${mediaId}`,
-        {
-            headers: {
-                Authorization: `Bearer ${WHATSAPP_TOKEN}`
+    const mediaInfo =
+        await axios.get(
+            `https://graph.facebook.com/v23.0/${mediaId}`,
+            {
+                headers: {
+                    Authorization:
+                        `Bearer ${WHATSAPP_TOKEN}`
+                }
             }
-        }
-    );
+        );
 
-    const mediaUrl = mediaInfo.data.url;
+    const mediaUrl =
+        mediaInfo.data.url;
 
     if (!mediaUrl) {
         throw new Error(
@@ -257,18 +302,24 @@ async function downloadMedia(mediaId) {
         "[MEDIA] URL da mídia encontrada."
     );
 
-    const response = await axios.get(
-        mediaUrl,
-        {
-            responseType: "arraybuffer",
-            headers: {
-                Authorization: `Bearer ${WHATSAPP_TOKEN}`
+    const response =
+        await axios.get(
+            mediaUrl,
+            {
+                responseType:
+                    "arraybuffer",
+
+                headers: {
+                    Authorization:
+                        `Bearer ${WHATSAPP_TOKEN}`
+                }
             }
-        }
-    );
+        );
 
     const buffer =
-        Buffer.from(response.data);
+        Buffer.from(
+            response.data
+        );
 
     console.log(
         "[MEDIA] Download concluído:",
@@ -283,16 +334,22 @@ async function downloadMedia(mediaId) {
 // UPLOAD DE MÍDIA
 // ============================================================
 
-async function uploadMedia(buffer, mimeType) {
+async function uploadMedia(
+    buffer,
+    mimeType
+) {
     console.log(
         "[UPLOAD] Enviando mídia:",
         {
-            tamanho: buffer.length,
+            tamanho:
+                buffer.length,
+
             mimeType
         }
     );
 
-    const form = new FormData();
+    const form =
+        new FormData();
 
     form.append(
         "messaging_product",
@@ -303,21 +360,27 @@ async function uploadMedia(buffer, mimeType) {
         "file",
         buffer,
         {
-            filename: "sticker.webp",
-            contentType: mimeType
+            filename:
+                "sticker.webp",
+
+            contentType:
+                mimeType
         }
     );
 
-    const response = await axios.post(
-        `${GRAPH_URL}/media`,
-        form,
-        {
-            headers: {
-                Authorization: `Bearer ${WHATSAPP_TOKEN}`,
-                ...form.getHeaders()
+    const response =
+        await axios.post(
+            `${GRAPH_URL}/media`,
+            form,
+            {
+                headers: {
+                    Authorization:
+                        `Bearer ${WHATSAPP_TOKEN}`,
+
+                    ...form.getHeaders()
+                }
             }
-        }
-    );
+        );
 
     console.log(
         "[UPLOAD] Mídia enviada. ID:",
@@ -336,35 +399,42 @@ async function sendSticker(
     stickerBuffer,
     animated = false
 ) {
-    // Primeiro envia a mídia para a Meta
     const mediaId =
         await uploadMedia(
             stickerBuffer,
             "image/webp"
         );
 
-    // Depois envia a figurinha para o usuário
     const response =
         await axios.post(
             `${GRAPH_URL}/messages`,
             {
-                messaging_product: "whatsapp",
+                messaging_product:
+                    "whatsapp",
+
                 to,
-                type: "sticker",
+
+                type:
+                    "sticker",
+
                 sticker: {
                     id: mediaId
                 }
             },
             {
                 headers: {
-                    Authorization: `Bearer ${WHATSAPP_TOKEN}`,
-                    "Content-Type": "application/json"
+                    Authorization:
+                        `Bearer ${WHATSAPP_TOKEN}`,
+
+                    "Content-Type":
+                        "application/json"
                 }
             }
         );
 
     const messageId =
-        response.data?.messages?.[0]?.id;
+        response.data
+            ?.messages?.[0]?.id;
 
     console.log(
         "[STICKER] Figurinha enviada:",
@@ -375,10 +445,10 @@ async function sendSticker(
         }
     );
 
-    // IMPORTANTE:
-    // Agora também guardamos as figurinhas
-    // criadas pelo próprio bot.
-    if (messageId && mediaId) {
+    if (
+        messageId &&
+        mediaId
+    ) {
         rememberSticker(
             messageId,
             mediaId,
@@ -393,7 +463,9 @@ async function sendSticker(
 // FOTO -> STICKER
 // ============================================================
 
-async function imageToSticker(buffer) {
+async function imageToSticker(
+    buffer
+) {
     console.log(
         "[FIG] Convertendo imagem para sticker..."
     );
@@ -404,7 +476,9 @@ async function imageToSticker(buffer) {
                 512,
                 512,
                 {
-                    fit: "contain",
+                    fit:
+                        "contain",
+
                     background: {
                         r: 0,
                         g: 0,
@@ -431,7 +505,9 @@ async function imageToSticker(buffer) {
 // VÍDEO -> STICKER ANIMADO
 // ============================================================
 
-async function videoToAnimatedSticker(buffer) {
+async function videoToAnimatedSticker(
+    buffer
+) {
     const tempDir =
         await fs.promises.mkdtemp(
             path.join(
@@ -462,7 +538,10 @@ async function videoToAnimatedSticker(buffer) {
         quality
     ) => {
         return new Promise(
-            (resolve, reject) => {
+            (
+                resolve,
+                reject
+            ) => {
                 ffmpeg(inputPath)
                     .outputOptions([
                         "-t",
@@ -497,7 +576,9 @@ async function videoToAnimatedSticker(buffer) {
                         "error",
                         reject
                     )
-                    .save(outputPath);
+                    .save(
+                        outputPath
+                    );
             }
         );
     };
@@ -548,267 +629,151 @@ async function videoToAnimatedSticker(buffer) {
         await fs.promises.rm(
             tempDir,
             {
-                recursive: true,
-                force: true
+                recursive:
+                    true,
+
+                force:
+                    true
             }
         );
     }
 }
 
 // ============================================================
-// ESCAPAR XML
+// ADICIONAR DESCRIÇÃO / AUTOR DA FIGURINHA
 // ============================================================
 
-function escapeXml(text) {
-    return text
-        .replace(
-            /&/g,
-            "&amp;"
-        )
-        .replace(
-            /</g,
-            "&lt;"
-        )
-        .replace(
-            />/g,
-            "&gt;"
-        )
-        .replace(
-            /"/g,
-            "&quot;"
-        )
-        .replace(
-            /'/g,
-            "&apos;"
-        );
-}
-
-// ============================================================
-// QUEBRA DE TEXTO
-// ============================================================
-
-function wrapText(
-    text,
-    maxChars
-) {
-    const words =
-        text.split(/\s+/);
-
-    const lines = [];
-
-    let current = "";
-
-    for (
-        const word of words
-    ) {
-        if (!current) {
-            current = word;
-            continue;
-        }
-
-        const test =
-            `${current} ${word}`;
-
-        if (
-            test.length <=
-            maxChars
-        ) {
-            current = test;
-        } else {
-            lines.push(current);
-            current = word;
-        }
-    }
-
-    if (current) {
-        lines.push(current);
-    }
-
-    return lines.slice(
-        0,
-        5
-    );
-}
-
-// ============================================================
-// CRIAR TEXTO SVG
-// ============================================================
-
-function createTextSvg(
-    text,
-    width = 512,
-    height = 512
-) {
-    const safeText =
-        escapeXml(text);
-
-    const lines =
-        wrapText(
-            safeText,
-            22
-        );
-
-    const fontSize =
-        lines.length >= 4
-            ? 40
-            : lines.length >= 3
-                ? 46
-                : 52;
-
-    const lineHeight =
-        fontSize + 8;
-
-    const totalHeight =
-        lines.length *
-        lineHeight;
-
-    const startY =
-        height -
-        totalHeight -
-        35;
-
-    let textElements = "";
-
-    lines.forEach(
-        (
-            line,
-            index
-        ) => {
-            const y =
-                startY +
-                index *
-                lineHeight;
-
-            textElements += `
-                <text
-                    x="50%"
-                    y="${y}"
-                    text-anchor="middle"
-                    font-family="Arial, DejaVu Sans, sans-serif"
-                    font-size="${fontSize}px"
-                    font-weight="bold"
-                    fill="white"
-                    stroke="black"
-                    stroke-width="10"
-                    stroke-linejoin="round"
-                    paint-order="stroke fill"
-                >${line}</text>
-            `;
-        }
-    );
-
-    return `
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="${width}"
-            height="${height}"
-        >
-            ${textElements}
-        </svg>
-    `;
-}
-
-// ============================================================
-// DETECTAR SE STICKER É ANIMADO
-// ============================================================
-
-async function detectStickerAnimated(buffer) {
-    console.log(
-        "[TEXTO] Detectando se a figurinha é animada..."
-    );
-
-    try {
-        const metadata =
-            await sharp(
-                buffer,
-                {
-                    animated: true
-                }
-            ).metadata();
-
-        console.log(
-            "[TEXTO] Metadata:",
-            {
-                format: metadata.format,
-                width: metadata.width,
-                height: metadata.height,
-                pages: metadata.pages,
-                pageHeight: metadata.pageHeight
-            }
-        );
-
-        return (
-            metadata.pages &&
-            metadata.pages > 1
-        );
-
-    } catch (error) {
-        console.error(
-            "[TEXTO] Erro ao analisar metadata:",
-            error.message
-        );
-
-        // Se não conseguir detectar,
-        // mantém o valor original salvo.
-        return false;
-    }
-}
-
-// ============================================================
-// TEXTO EM STICKER ESTÁTICO
-// ============================================================
-
-async function addTextToStaticSticker(
+async function adicionarDescricao(
     buffer,
-    text
+    descricao
 ) {
     console.log(
-        "[TEXTO] Processando sticker estático..."
+        "[TEXTO] Adicionando descrição:",
+        descricao
     );
 
-    const metadata =
-        await sharp(buffer)
-            .metadata();
+    if (
+        !descricao ||
+        !descricao.trim()
+    ) {
+        throw new Error(
+            "A descrição da figurinha está vazia."
+        );
+    }
 
-    const width =
-        metadata.width ||
-        512;
+    const img =
+        new webpmux.Image();
 
-    const height =
-        metadata.height ||
-        512;
+    await img.load(
+        buffer
+    );
+
+    const exif =
+        {
+            "sticker-pack-id":
+                "com.rkdamirella.stickers",
+
+            "sticker-pack-name":
+                descricao.trim(),
+
+            "sticker-pack-publisher":
+                "rk da miis",
+
+            "sticker-author-name":
+                descricao.trim()
+        };
+
+    const exifJson =
+        JSON.stringify(
+            exif
+        );
+
+    const exifBuffer =
+        Buffer.from(
+            exifJson
+        );
+
+    await img.save(
+        Buffer.from(
+            buffer
+        )
+    );
 
     console.log(
-        "[TEXTO] Dimensões:",
-        width,
-        "x",
-        height
+        "[TEXTO] Descrição adicionada com sucesso."
     );
 
-    const svg =
-        createTextSvg(
-            text,
-            width,
-            height
+    return buffer;
+}
+
+// ============================================================
+// CRIAR METADADOS DA FIGURINHA
+// ============================================================
+
+function createStickerExif(
+    packName
+) {
+    const json =
+        JSON.stringify({
+            "sticker-pack-id":
+                "com.rkdamirella.stickers",
+
+            "sticker-pack-name":
+                packName,
+
+            "sticker-pack-publisher":
+                "rk da miis",
+
+            "sticker-author-name":
+                packName
+        });
+
+    return Buffer.from(
+        json
+    );
+}
+
+// ============================================================
+// ADICIONAR METADADOS REALMENTE AO WEBP
+// ============================================================
+
+async function setStickerMetadata(
+    buffer,
+    descricao
+) {
+    console.log(
+        "[TEXTO] Aplicando metadados:",
+        descricao
+    );
+
+    const image =
+        new webpmux.Image();
+
+    await image.load(
+        buffer
+    );
+
+    const exif =
+        createStickerExif(
+            descricao
         );
+
+    /*
+     * O WhatsApp utiliza EXIF para
+     * armazenar os dados do pacote
+     * da figurinha.
+     */
+    await image.save(
+        {
+            exif
+        }
+    );
 
     const result =
-        await sharp(buffer)
-            .composite([
-                {
-                    input:
-                        Buffer.from(svg),
-                    top: 0,
-                    left: 0
-                }
-            ])
-            .webp({
-                quality: 80
-            })
-            .toBuffer();
+        await image.saveBuffer();
 
     console.log(
-        "[TEXTO] Sticker estático finalizado:",
+        "[TEXTO] Metadados aplicados:",
         result.length,
         "bytes"
     );
@@ -817,181 +782,7 @@ async function addTextToStaticSticker(
 }
 
 // ============================================================
-// TEXTO EM STICKER ANIMADO
-// ============================================================
-
-async function addTextToAnimatedSticker(
-    buffer,
-    text
-) {
-    console.log(
-        "[TEXTO] Processando sticker animado..."
-    );
-
-    const tempDir =
-        await fs.promises.mkdtemp(
-            path.join(
-                os.tmpdir(),
-                "sticker-text-"
-            )
-        );
-
-    const inputPath =
-        path.join(
-            tempDir,
-            "input.webp"
-        );
-
-    const overlayPath =
-        path.join(
-            tempDir,
-            "text.png"
-        );
-
-    const outputPath =
-        path.join(
-            tempDir,
-            "output.webp"
-        );
-
-    try {
-        await fs.promises.writeFile(
-            inputPath,
-            buffer
-        );
-
-        const svg =
-            createTextSvg(
-                text,
-                512,
-                512
-            );
-
-        const overlay =
-            await sharp(
-                Buffer.from(svg)
-            )
-                .png()
-                .toBuffer();
-
-        await fs.promises.writeFile(
-            overlayPath,
-            overlay
-        );
-
-        const runFFmpeg = (
-            quality
-        ) => {
-            return new Promise(
-                (
-                    resolve,
-                    reject
-                ) => {
-                    ffmpeg()
-                        .input(inputPath)
-
-                        .input(
-                            overlayPath
-                        )
-
-                        .inputOptions([
-                            "-loop",
-                            "1"
-                        ])
-
-                        .complexFilter([
-                            "[1:v]format=rgba[text]",
-                            "[0:v][text]overlay=0:0:shortest=1"
-                        ])
-
-                        .outputOptions([
-                            "-an",
-
-                            "-loop",
-                            "0",
-
-                            "-c:v",
-                            "libwebp",
-
-                            "-q:v",
-                            String(
-                                quality
-                            ),
-
-                            "-compression_level",
-                            "6",
-
-                            "-preset",
-                            "picture"
-                        ])
-
-                        .format("webp")
-
-                        .on(
-                            "end",
-                            resolve
-                        )
-
-                        .on(
-                            "error",
-                            reject
-                        )
-
-                        .save(
-                            outputPath
-                        );
-                }
-            );
-        };
-
-        await runFFmpeg(
-            50
-        );
-
-        let result =
-            await fs.promises.readFile(
-                outputPath
-            );
-
-        if (
-            result.length >
-            500 * 1024
-        ) {
-            console.log(
-                "[TEXTO] Sticker animado passou de 500 KB. Reduzindo qualidade..."
-            );
-
-            await runFFmpeg(
-                65
-            );
-
-            result =
-                await fs.promises.readFile(
-                    outputPath
-                );
-        }
-
-        console.log(
-            "[TEXTO] Sticker animado finalizado:",
-            result.length,
-            "bytes"
-        );
-
-        return result;
-
-    } finally {
-        await fs.promises.rm(
-            tempDir,
-            {
-                recursive: true,
-                force: true
-            }
-        );
-    }
-}
-
-// ============================================================
-// WEBHOOK GET - VERIFICAÇÃO META
+// WEBHOOK GET
 // ============================================================
 
 app.get(
@@ -1025,7 +816,9 @@ app.get(
 
             return res
                 .status(200)
-                .send(challenge);
+                .send(
+                    challenge
+                );
         }
 
         return res
@@ -1043,7 +836,6 @@ app.post(
         req,
         res
     ) => {
-
         console.log(
             "Webhook recebido:",
             JSON.stringify(
@@ -1053,7 +845,6 @@ app.post(
             )
         );
 
-        // Responde para a Meta imediatamente
         res.sendStatus(200);
 
         try {
@@ -1076,20 +867,27 @@ app.post(
             const from =
                 message.from;
 
-            registerUser(from);
+            registerUser(
+                from
+            );
 
             console.log(
                 "[MESSAGE]",
                 {
                     from,
-                    type: message.type,
-                    id: message.id,
-                    contextId: message.context?.id
+                    type:
+                        message.type,
+
+                    id:
+                        message.id,
+
+                    contextId:
+                        message.context?.id
                 }
             );
 
             // ====================================================
-            // RECEBEU UMA FIGURINHA
+            // RECEBEU FIGURINHA
             // ====================================================
 
             if (
@@ -1102,9 +900,14 @@ app.post(
                 console.log(
                     "[STICKER RECEBIDO]",
                     {
-                        messageId: message.id,
-                        mediaId: sticker?.id,
-                        animated: sticker?.animated
+                        messageId:
+                            message.id,
+
+                        mediaId:
+                            sticker?.id,
+
+                        animated:
+                            sticker?.animated
                     }
                 );
 
@@ -1122,7 +925,7 @@ app.post(
             }
 
             // ====================================================
-            // RECEBEU UMA IMAGEM
+            // RECEBEU IMAGEM
             // ====================================================
 
             if (
@@ -1130,9 +933,11 @@ app.post(
                 "image"
             ) {
                 const caption =
-                    message.image?.caption
+                    message.image
+                        ?.caption
                         ?.trim()
-                        .toLowerCase() || "";
+                        .toLowerCase() ||
+                    "";
 
                 if (
                     caption !==
@@ -1181,7 +986,9 @@ app.post(
                         "fig"
                     );
 
-                } catch (error) {
+                } catch (
+                    error
+                ) {
                     console.error(
                         "Erro no /fig:",
                         error.response?.data ||
@@ -1207,9 +1014,11 @@ app.post(
                 "video"
             ) {
                 const caption =
-                    message.video?.caption
+                    message.video
+                        ?.caption
                         ?.trim()
-                        .toLowerCase() || "";
+                        .toLowerCase() ||
+                    "";
 
                 if (
                     caption !==
@@ -1258,7 +1067,9 @@ app.post(
                         "gif"
                     );
 
-                } catch (error) {
+                } catch (
+                    error
+                ) {
                     console.error(
                         "Erro no /gif:",
                         error.response?.data ||
@@ -1276,7 +1087,7 @@ app.post(
             }
 
             // ====================================================
-            // SÓ PROCESSA TEXTO A PARTIR DAQUI
+            // TEXTO
             // ====================================================
 
             if (
@@ -1288,7 +1099,8 @@ app.post(
 
             const text =
                 message.text?.body
-                    ?.trim() || "";
+                    ?.trim() ||
+                "";
 
             const lowerText =
                 text.toLowerCase();
@@ -1366,7 +1178,7 @@ app.post(
 
                     `/gif — envie um vídeo com /gif para transformar em figurinha animada.\n\n` +
 
-                    `/texto — responda a uma figurinha com /texto seguido do texto desejado.\n\n` +
+                    `/texto — responda a uma figurinha com /texto seguido da descrição desejada.\n\n` +
 
                     `⚠️ Limite diário: ${DAILY_LIMIT} comandos /fig + /gif.`
                 );
@@ -1385,7 +1197,6 @@ app.post(
                     "/texto "
                 )
             ) {
-
                 console.log(
                     "[TEXTO] ================================"
                 );
@@ -1395,24 +1206,19 @@ app.post(
                     text
                 );
 
-                const textToAdd =
+                const descricao =
                     text
                         .slice(6)
                         .trim();
 
-                console.log(
-                    "[TEXTO] Texto a adicionar:",
-                    textToAdd
-                );
-
                 if (
-                    !textToAdd
+                    !descricao
                 ) {
                     await sendText(
                         from,
-                        `❌ Faltou o texto.\n\n` +
-                        `Responda a uma figurinha assim:\n\n` +
-                        `/texto seu texto aqui`
+                        `❌ Faltou a descrição.\n\n` +
+                        `Responda a uma figurinha assim:\n` +
+                        `/texto rk da miis`
                     );
 
                     return;
@@ -1429,15 +1235,11 @@ app.post(
                 if (
                     !repliedMessageId
                 ) {
-                    console.log(
-                        "[TEXTO] ERRO: não existe context.id"
-                    );
-
                     await sendText(
                         from,
                         `❌ Você precisa responder diretamente a uma figurinha.\n\n` +
                         `Exemplo:\n` +
-                        `/texto seu texto aqui`
+                        `/texto rk da miis`
                     );
 
                     return;
@@ -1449,39 +1251,26 @@ app.post(
                     );
 
                 console.log(
-                    "[TEXTO] Figurinha encontrada na memória:",
+                    "[TEXTO] Figurinha encontrada:",
                     originalSticker
                 );
 
                 if (
                     !originalSticker
                 ) {
-                    console.log(
-                        "[TEXTO] ERRO: figurinha não encontrada na memória."
-                    );
-
                     await sendText(
                         from,
                         `❌ Não encontrei essa figurinha na memória do bot.\n\n` +
-                        `Tente enviar a figurinha novamente e depois responda a ela com /texto.`
+                        `Envie a figurinha novamente e responda a ela.`
                     );
 
                     return;
                 }
 
                 try {
-                    console.log(
-                        "[TEXTO] Etapa 1: enviando mensagem de processamento..."
-                    );
-
                     await sendText(
                         from,
-                        "⏳ Adicionando o texto na figurinha..."
-                    );
-
-                    console.log(
-                        "[TEXTO] Etapa 2: baixando mídia:",
-                        originalSticker.mediaId
+                        "⏳ Aplicando a descrição na figurinha..."
                     );
 
                     const originalBuffer =
@@ -1489,81 +1278,25 @@ app.post(
                             originalSticker.mediaId
                         );
 
-                    console.log(
-                        "[TEXTO] Etapa 3: mídia baixada:",
-                        originalBuffer.length,
-                        "bytes"
-                    );
-
-                    console.log(
-                        "[TEXTO] Etapa 4: detectando animação..."
-                    );
-
-                    const detectedAnimated =
-                        await detectStickerAnimated(
-                            originalBuffer
+                    const finalSticker =
+                        await setStickerMetadata(
+                            originalBuffer,
+                            descricao
                         );
-
-                    const isAnimated =
-                        detectedAnimated ||
-                        originalSticker.animated === true;
-
-                    console.log(
-                        "[TEXTO] Tipo final:",
-                        isAnimated
-                            ? "ANIMADO"
-                            : "ESTÁTICO"
-                    );
-
-                    let finalSticker;
-
-                    if (
-                        isAnimated
-                    ) {
-                        console.log(
-                            "[TEXTO] Etapa 5: adicionando texto com FFmpeg..."
-                        );
-
-                        finalSticker =
-                            await addTextToAnimatedSticker(
-                                originalBuffer,
-                                textToAdd
-                            );
-
-                    } else {
-                        console.log(
-                            "[TEXTO] Etapa 5: adicionando texto com Sharp..."
-                        );
-
-                        finalSticker =
-                            await addTextToStaticSticker(
-                                originalBuffer,
-                                textToAdd
-                            );
-                    }
-
-                    console.log(
-                        "[TEXTO] Etapa 6: resultado criado:",
-                        finalSticker.length,
-                        "bytes"
-                    );
-
-                    console.log(
-                        "[TEXTO] Etapa 7: enviando figurinha final..."
-                    );
 
                     await sendSticker(
                         from,
                         finalSticker,
-                        isAnimated
+                        originalSticker.animated
                     );
 
                     console.log(
-                        "[TEXTO] SUCESSO: figurinha enviada com texto."
+                        "[TEXTO] Descrição aplicada com sucesso."
                     );
 
-                } catch (error) {
-
+                } catch (
+                    error
+                ) {
                     console.error(
                         "[TEXTO] ================= ERRO ================="
                     );
@@ -1589,7 +1322,7 @@ app.post(
 
                     await sendText(
                         from,
-                        "❌ Não consegui adicionar o texto nessa figurinha."
+                        "❌ Não consegui aplicar a descrição nessa figurinha."
                     );
                 }
 
@@ -1597,7 +1330,7 @@ app.post(
             }
 
             // ====================================================
-            // TEXTO /FIG
+            // /FIG
             // ====================================================
 
             if (
@@ -1613,7 +1346,7 @@ app.post(
             }
 
             // ====================================================
-            // TEXTO /GIF
+            // /GIF
             // ====================================================
 
             if (
@@ -1645,7 +1378,9 @@ app.post(
                 return;
             }
 
-        } catch (error) {
+        } catch (
+            error
+        ) {
             console.error(
                 "Erro geral no webhook:",
                 error.response?.data ||
