@@ -56,10 +56,11 @@ const stats = {
 // ============================================================
 
 const stickerMessages = new Map();
+
 const MAX_STORED_STICKERS = 1000;
 
 // ============================================================
-// DATA BRASIL
+// DATA DO BRASIL
 // ============================================================
 
 function getBrazilDate() {
@@ -94,7 +95,9 @@ function resetDailyStatsIfNeeded() {
 // ============================================================
 
 function registerUser(userId) {
-    if (!userId) return;
+    if (!userId) {
+        return;
+    }
 
     resetDailyStatsIfNeeded();
 
@@ -124,7 +127,7 @@ function registerSticker(type) {
 }
 
 // ============================================================
-// GUARDAR FIGURINHA
+// MEMORIZAR FIGURINHA
 // ============================================================
 
 function rememberSticker(
@@ -185,7 +188,8 @@ function rememberSticker(
 // ============================================================
 
 function getUserData(userId) {
-    const today = getBrazilDate();
+    const today =
+        getBrazilDate();
 
     if (!users.has(userId)) {
         users.set(
@@ -197,9 +201,12 @@ function getUserData(userId) {
         );
     }
 
-    const user = users.get(userId);
+    const user =
+        users.get(userId);
 
-    if (user.date !== today) {
+    if (
+        user.date !== today
+    ) {
         user.date = today;
         user.commands = 0;
     }
@@ -212,7 +219,9 @@ function getUserData(userId) {
 // ============================================================
 
 function canUseCommand(userId) {
-    if (unlimitedUsers.has(userId)) {
+    if (
+        unlimitedUsers.has(userId)
+    ) {
         return true;
     }
 
@@ -340,6 +349,16 @@ async function uploadMedia(
     buffer,
     mimeType
 ) {
+    console.log(
+        "[UPLOAD] Enviando:",
+        {
+            tamanho:
+                buffer.length,
+
+            mimeType
+        }
+    );
+
     const form =
         new FormData();
 
@@ -565,7 +584,9 @@ async function videoToAnimatedSticker(
                         "-preset",
                         "picture"
                     ])
-                    .format("webp")
+                    .format(
+                        "webp"
+                    )
                     .on(
                         "end",
                         resolve
@@ -638,7 +659,229 @@ async function videoToAnimatedSticker(
 }
 
 // ============================================================
-// METADADOS DA FIGURINHA
+// CRIAR EXIF DO WHATSAPP
+// ============================================================
+
+function createStickerExif(
+    descricao
+) {
+    const metadata = {
+        "sticker-pack-id":
+            "com.rkdamirella.stickers",
+
+        "sticker-pack-name":
+            descricao.trim(),
+
+        "sticker-pack-publisher":
+            "rk da miis",
+
+        "emojis":
+            ["🤍"]
+    };
+
+    const jsonBuffer =
+        Buffer.from(
+            JSON.stringify(
+                metadata
+            ),
+            "utf8"
+        );
+
+    /*
+     * Estrutura EXIF utilizada
+     * para metadados de stickers.
+     */
+
+    const header =
+        Buffer.from([
+            0x49, 0x49,
+            0x2A, 0x00,
+
+            0x08, 0x00,
+            0x00, 0x00,
+
+            0x01, 0x00,
+
+            0x41, 0x57,
+
+            0x07, 0x00,
+
+            0x00, 0x00,
+            0x00, 0x00,
+
+            0x16, 0x00,
+            0x00, 0x00
+        ]);
+
+    /*
+     * Os 4 bytes da posição 14
+     * recebem o tamanho do JSON.
+     */
+
+    header.writeUInt32LE(
+        jsonBuffer.length,
+        14
+    );
+
+    return {
+        metadata,
+        exif:
+            Buffer.concat([
+                header,
+                jsonBuffer
+            ])
+    };
+}
+
+// ============================================================
+// VERIFICAR EXIF AUTOMATICAMENTE
+// ============================================================
+
+async function verifyStickerMetadata(
+    buffer,
+    expectedDescription
+) {
+    console.log(
+        "[TESTE EXIF] ================================"
+    );
+
+    console.log(
+        "[TESTE EXIF] Verificando WebP..."
+    );
+
+    const image =
+        new webpmux.Image();
+
+    await image.load(
+        buffer
+    );
+
+    if (
+        !image.exif
+    ) {
+        console.error(
+            "[TESTE EXIF] ❌ O WebP não possui EXIF."
+        );
+
+        return false;
+    }
+
+    console.log(
+        "[TESTE EXIF] EXIF encontrado:",
+        image.exif.length,
+        "bytes"
+    );
+
+    const exif =
+        image.exif;
+
+    /*
+     * O JSON começa depois dos
+     * 22 bytes do cabeçalho usado.
+     */
+
+    const possibleJson =
+        exif
+            .subarray(22)
+            .toString(
+                "utf8"
+            );
+
+    console.log(
+        "[TESTE EXIF] Conteúdo detectado:",
+        possibleJson
+    );
+
+    let metadata;
+
+    try {
+        metadata =
+            JSON.parse(
+                possibleJson
+            );
+    } catch (
+        error
+    ) {
+        console.error(
+            "[TESTE EXIF] ❌ Não foi possível interpretar o JSON."
+        );
+
+        console.error(
+            "[TESTE EXIF] Erro:",
+            error.message
+        );
+
+        return false;
+    }
+
+    console.log(
+        "[TESTE EXIF] Metadados encontrados:",
+        metadata
+    );
+
+    const nameOk =
+        metadata[
+            "sticker-pack-name"
+        ] ===
+        expectedDescription;
+
+    const publisherOk =
+        metadata[
+            "sticker-pack-publisher"
+        ] ===
+        "rk da miis";
+
+    const idOk =
+        metadata[
+            "sticker-pack-id"
+        ] ===
+        "com.rkdamirella.stickers";
+
+    console.log(
+        "[TESTE EXIF] Nome:",
+        nameOk
+            ? "✅ OK"
+            : "❌ ERRO"
+    );
+
+    console.log(
+        "[TESTE EXIF] Autor:",
+        publisherOk
+            ? "✅ OK"
+            : "❌ ERRO"
+    );
+
+    console.log(
+        "[TESTE EXIF] ID:",
+        idOk
+            ? "✅ OK"
+            : "❌ ERRO"
+    );
+
+    const valid =
+        nameOk &&
+        publisherOk &&
+        idOk;
+
+    if (valid) {
+        console.log(
+            "[TESTE EXIF] ✅ METADADOS CONFIRMADOS NO WEBP."
+        );
+    } else {
+        console.error(
+            "[TESTE EXIF] ❌ METADADOS NÃO PASSARAM NO TESTE."
+        );
+    }
+
+    console.log(
+        "[TESTE EXIF] ================================"
+    );
+
+    return valid;
+}
+
+// ============================================================
+// ADICIONAR METADADOS
 // ============================================================
 
 async function setStickerMetadata(
@@ -666,61 +909,18 @@ async function setStickerMetadata(
         buffer
     );
 
-    const json =
-        JSON.stringify({
-            "sticker-pack-id":
-                "com.rkdamirella.stickers",
-
-            "sticker-pack-name":
-                descricao.trim(),
-
-            "sticker-pack-publisher":
-                "rk da miis",
-
-            "emojis":
-                ["🤍"]
-        });
-
-    const jsonBuffer =
-        Buffer.from(
-            json,
-            "utf8"
+    const {
+        metadata,
+        exif
+    } =
+        createStickerExif(
+            descricao
         );
 
-    const exifHeader =
-        Buffer.from([
-            0x49, 0x49,
-            0x2A, 0x00,
-
-            0x08, 0x00,
-            0x00, 0x00,
-
-            0x01, 0x00,
-
-            0x41, 0x57,
-
-            0x07, 0x00,
-
-            0x00, 0x00,
-            0x00, 0x00,
-
-            0x16, 0x00,
-            0x00, 0x00,
-
-            0x00, 0x00,
-            0x00, 0x00
-        ]);
-
-    exifHeader.writeUInt32LE(
-        jsonBuffer.length,
-        14
+    console.log(
+        "[TEXTO] Metadados que serão gravados:",
+        metadata
     );
-
-    const exif =
-        Buffer.concat([
-            exifHeader,
-            jsonBuffer
-        ]);
 
     image.exif =
         exif;
@@ -731,9 +931,29 @@ async function setStickerMetadata(
         );
 
     console.log(
-        "[TEXTO] Metadados aplicados:",
+        "[TEXTO] WebP com EXIF criado:",
         result.length,
         "bytes"
+    );
+
+    // ========================================================
+    // TESTE AUTOMÁTICO
+    // ========================================================
+
+    const verified =
+        await verifyStickerMetadata(
+            result,
+            descricao.trim()
+        );
+
+    if (!verified) {
+        throw new Error(
+            "O teste de metadados falhou. A figurinha NÃO será enviada."
+        );
+    }
+
+    console.log(
+        "[TEXTO] ✅ Teste concluído. Figurinha liberada para upload."
     );
 
     return result;
@@ -823,14 +1043,13 @@ app.post(
             }
 
             // ====================================================
-            // CORREÇÃO IMPORTANTE:
-            // A API atual está enviando from_user_id
-            // em vez de message.from
+            // IDENTIFICAR USUÁRIO
             // ====================================================
 
             const from =
                 message.from ||
                 message.from_user_id ||
+                value?.contacts?.[0]?.wa_id ||
                 value?.contacts?.[0]?.user_id;
 
             console.log(
@@ -850,7 +1069,7 @@ app.post(
 
             if (!from) {
                 console.error(
-                    "[MESSAGE] Não foi possível identificar o usuário."
+                    "[MESSAGE] ❌ Usuário não identificado."
                 );
 
                 return;
@@ -870,6 +1089,20 @@ app.post(
             ) {
                 const sticker =
                     message.sticker;
+
+                console.log(
+                    "[STICKER RECEBIDO]",
+                    {
+                        messageId:
+                            message.id,
+
+                        mediaId:
+                            sticker?.id,
+
+                        animated:
+                            sticker?.animated
+                    }
+                );
 
                 if (
                     sticker?.id
@@ -1045,7 +1278,7 @@ app.post(
             }
 
             // ====================================================
-            // SÓ CONTINUA PARA TEXTO
+            // SOMENTE TEXTO
             // ====================================================
 
             if (
@@ -1226,6 +1459,11 @@ app.post(
                             descricao
                         );
 
+                    /*
+                     * O upload só acontece depois
+                     * do teste EXIF passar.
+                     */
+
                     await sendSticker(
                         from,
                         finalSticker,
@@ -1233,7 +1471,7 @@ app.post(
                     );
 
                     console.log(
-                        "[TEXTO] Descrição aplicada com sucesso."
+                        "[TEXTO] ✅ Descrição aplicada e figurinha enviada."
                     );
 
                 } catch (
@@ -1346,7 +1584,7 @@ app.get(
 );
 
 // ============================================================
-// SERVIDOR
+// INICIAR SERVIDOR
 // ============================================================
 
 app.listen(
