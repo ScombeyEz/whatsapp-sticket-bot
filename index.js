@@ -830,7 +830,7 @@ Envie uma foto com a legenda /fig`
 // INICIAR SERVIDOR
 // ===============================
 
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
 
     console.log(
         "===================================="
