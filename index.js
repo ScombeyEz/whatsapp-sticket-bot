@@ -32,12 +32,12 @@ const DAILY_LIMIT = 10;
 const users = new Map();
 const unlimitedUsers = new Set();
 
+const allUsers = new Set();
+const dailyUsers = new Set();
+
 // ============================================================
 // ESTATÍSTICAS
 // ============================================================
-
-const allUsers = new Set();
-const dailyUsers = new Set();
 
 const stats = {
     totalStickers: 0,
@@ -52,15 +52,14 @@ const stats = {
 };
 
 // ============================================================
-// FIGURINHAS
+// MEMÓRIA DAS FIGURINHAS
 // ============================================================
 
 const stickerMessages = new Map();
-
 const MAX_STORED_STICKERS = 1000;
 
 // ============================================================
-// DATA DO BRASIL
+// DATA BRASIL
 // ============================================================
 
 function getBrazilDate() {
@@ -73,7 +72,7 @@ function getBrazilDate() {
 }
 
 // ============================================================
-// RESET DAS ESTATÍSTICAS DIÁRIAS
+// RESET DIÁRIO
 // ============================================================
 
 function resetDailyStatsIfNeeded() {
@@ -95,6 +94,8 @@ function resetDailyStatsIfNeeded() {
 // ============================================================
 
 function registerUser(userId) {
+    if (!userId) return;
+
     resetDailyStatsIfNeeded();
 
     allUsers.add(userId);
@@ -123,7 +124,7 @@ function registerSticker(type) {
 }
 
 // ============================================================
-// GUARDAR FIGURINHA NA MEMÓRIA
+// GUARDAR FIGURINHA
 // ============================================================
 
 function rememberSticker(
@@ -154,12 +155,11 @@ function rememberSticker(
     );
 
     console.log(
-        "[STICKER] Figurinha salva na memória:",
+        "[STICKER] Figurinha salva:",
         {
             messageId,
             mediaId,
-            animated: animated === true,
-            totalMemoria: stickerMessages.size
+            animated: animated === true
         }
     );
 
@@ -181,12 +181,11 @@ function rememberSticker(
 }
 
 // ============================================================
-// DADOS DO USUÁRIO / LIMITE
+// DADOS DO USUÁRIO
 // ============================================================
 
 function getUserData(userId) {
-    const today =
-        getBrazilDate();
+    const today = getBrazilDate();
 
     if (!users.has(userId)) {
         users.set(
@@ -198,8 +197,7 @@ function getUserData(userId) {
         );
     }
 
-    const user =
-        users.get(userId);
+    const user = users.get(userId);
 
     if (user.date !== today) {
         user.date = today;
@@ -209,10 +207,12 @@ function getUserData(userId) {
     return user;
 }
 
+// ============================================================
+// LIMITE DIÁRIO
+// ============================================================
+
 function canUseCommand(userId) {
-    if (
-        unlimitedUsers.has(userId)
-    ) {
+    if (unlimitedUsers.has(userId)) {
         return true;
     }
 
@@ -239,6 +239,12 @@ async function sendText(
     to,
     text
 ) {
+    if (!to) {
+        throw new Error(
+            "Número do destinatário não encontrado."
+        );
+    }
+
     await axios.post(
         `${GRAPH_URL}/messages`,
         {
@@ -274,7 +280,7 @@ async function downloadMedia(
     mediaId
 ) {
     console.log(
-        "[MEDIA] Buscando informações da mídia:",
+        "[MEDIA] Buscando mídia:",
         mediaId
     );
 
@@ -297,10 +303,6 @@ async function downloadMedia(
             "A Meta não retornou uma URL para essa mídia."
         );
     }
-
-    console.log(
-        "[MEDIA] URL da mídia encontrada."
-    );
 
     const response =
         await axios.get(
@@ -338,16 +340,6 @@ async function uploadMedia(
     buffer,
     mimeType
 ) {
-    console.log(
-        "[UPLOAD] Enviando mídia:",
-        {
-            tamanho:
-                buffer.length,
-
-            mimeType
-        }
-    );
-
     const form =
         new FormData();
 
@@ -383,7 +375,7 @@ async function uploadMedia(
         );
 
     console.log(
-        "[UPLOAD] Mídia enviada. ID:",
+        "[UPLOAD] ID:",
         response.data.id
     );
 
@@ -391,7 +383,7 @@ async function uploadMedia(
 }
 
 // ============================================================
-// ENVIAR FIGURINHA
+// ENVIAR STICKER
 // ============================================================
 
 async function sendSticker(
@@ -399,6 +391,12 @@ async function sendSticker(
     stickerBuffer,
     animated = false
 ) {
+    if (!to) {
+        throw new Error(
+            "Número do destinatário não encontrado."
+        );
+    }
+
     const mediaId =
         await uploadMedia(
             stickerBuffer,
@@ -437,7 +435,7 @@ async function sendSticker(
             ?.messages?.[0]?.id;
 
     console.log(
-        "[STICKER] Figurinha enviada:",
+        "[STICKER] Enviado:",
         {
             messageId,
             mediaId,
@@ -460,14 +458,14 @@ async function sendSticker(
 }
 
 // ============================================================
-// FOTO -> STICKER
+// IMAGEM -> STICKER
 // ============================================================
 
 async function imageToSticker(
     buffer
 ) {
     console.log(
-        "[FIG] Convertendo imagem para sticker..."
+        "[FIG] Convertendo imagem..."
     );
 
     const result =
@@ -603,7 +601,7 @@ async function videoToAnimatedSticker(
             500 * 1024
         ) {
             console.log(
-                "[GIF] Arquivo passou de 500 KB. Reduzindo qualidade..."
+                "[GIF] Passou de 500 KB. Reduzindo..."
             );
 
             await runFFmpeg(
@@ -618,7 +616,7 @@ async function videoToAnimatedSticker(
         }
 
         console.log(
-            "[GIF] Sticker animado criado:",
+            "[GIF] Sticker criado:",
             result.length,
             "bytes"
         );
@@ -640,7 +638,7 @@ async function videoToAnimatedSticker(
 }
 
 // ============================================================
-// ADICIONAR METADADOS / DESCRIÇÃO DA FIGURINHA
+// METADADOS DA FIGURINHA
 // ============================================================
 
 async function setStickerMetadata(
@@ -668,12 +666,6 @@ async function setStickerMetadata(
         buffer
     );
 
-    /*
-     * Estrutura utilizada pelas figurinhas
-     * do WhatsApp para armazenar informações
-     * do pacote/autor.
-     */
-
     const json =
         JSON.stringify({
             "sticker-pack-id":
@@ -694,12 +686,6 @@ async function setStickerMetadata(
             json,
             "utf8"
         );
-
-    /*
-     * Cabeçalho EXIF/TIFF utilizado
-     * para inserir o JSON nos metadados
-     * da figurinha.
-     */
 
     const exifHeader =
         Buffer.from([
@@ -725,11 +711,6 @@ async function setStickerMetadata(
             0x00, 0x00
         ]);
 
-    /*
-     * O tamanho do JSON fica armazenado
-     * na posição 14 do bloco EXIF.
-     */
-
     exifHeader.writeUInt32LE(
         jsonBuffer.length,
         14
@@ -743,12 +724,6 @@ async function setStickerMetadata(
 
     image.exif =
         exif;
-
-    /*
-     * node-webpmux:
-     * save(null) retorna o WebP
-     * diretamente como Buffer.
-     */
 
     const result =
         await image.save(
@@ -847,12 +822,16 @@ app.post(
                 return;
             }
 
-            const from =
-                message.from;
+            // ====================================================
+            // CORREÇÃO IMPORTANTE:
+            // A API atual está enviando from_user_id
+            // em vez de message.from
+            // ====================================================
 
-            registerUser(
-                from
-            );
+            const from =
+                message.from ||
+                message.from_user_id ||
+                value?.contacts?.[0]?.user_id;
 
             console.log(
                 "[MESSAGE]",
@@ -869,8 +848,20 @@ app.post(
                 }
             );
 
+            if (!from) {
+                console.error(
+                    "[MESSAGE] Não foi possível identificar o usuário."
+                );
+
+                return;
+            }
+
+            registerUser(
+                from
+            );
+
             // ====================================================
-            // RECEBEU FIGURINHA
+            // STICKER RECEBIDO
             // ====================================================
 
             if (
@@ -879,20 +870,6 @@ app.post(
             ) {
                 const sticker =
                     message.sticker;
-
-                console.log(
-                    "[STICKER RECEBIDO]",
-                    {
-                        messageId:
-                            message.id,
-
-                        mediaId:
-                            sticker?.id,
-
-                        animated:
-                            sticker?.animated
-                    }
-                );
 
                 if (
                     sticker?.id
@@ -908,7 +885,7 @@ app.post(
             }
 
             // ====================================================
-            // RECEBEU IMAGEM
+            // IMAGEM /FIG
             // ====================================================
 
             if (
@@ -936,8 +913,7 @@ app.post(
                 ) {
                     await sendText(
                         from,
-                        `❌ Você atingiu o limite diário de ${DAILY_LIMIT} comandos /fig + /gif.\n\n` +
-                        `O limite será renovado automaticamente à meia-noite.`
+                        `❌ Você atingiu o limite diário de ${DAILY_LIMIT} comandos /fig + /gif.\n\nO limite será renovado automaticamente à meia-noite.`
                     );
 
                     return;
@@ -989,7 +965,7 @@ app.post(
             }
 
             // ====================================================
-            // RECEBEU VÍDEO
+            // VÍDEO /GIF
             // ====================================================
 
             if (
@@ -1017,8 +993,7 @@ app.post(
                 ) {
                     await sendText(
                         from,
-                        `❌ Você atingiu o limite diário de ${DAILY_LIMIT} comandos /fig + /gif.\n\n` +
-                        `O limite será renovado automaticamente à meia-noite.`
+                        `❌ Você atingiu o limite diário de ${DAILY_LIMIT} comandos /fig + /gif.\n\nO limite será renovado automaticamente à meia-noite.`
                     );
 
                     return;
@@ -1070,7 +1045,7 @@ app.post(
             }
 
             // ====================================================
-            // TEXTO
+            // SÓ CONTINUA PARA TEXTO
             // ====================================================
 
             if (
@@ -1148,10 +1123,8 @@ app.post(
             // ====================================================
 
             if (
-                lowerText ===
-                    "/ajuda" ||
-                lowerText ===
-                    "/help"
+                lowerText === "/ajuda" ||
+                lowerText === "/help"
             ) {
                 await sendText(
                     from,
@@ -1174,18 +1147,15 @@ app.post(
             // ====================================================
 
             if (
-                lowerText ===
-                    "/texto" ||
-                lowerText.startsWith(
-                    "/texto "
-                )
+                lowerText === "/texto" ||
+                lowerText.startsWith("/texto ")
             ) {
                 console.log(
                     "[TEXTO] ================================"
                 );
 
                 console.log(
-                    "[TEXTO] Comando recebido:",
+                    "[TEXTO] Comando:",
                     text
                 );
 
@@ -1194,14 +1164,10 @@ app.post(
                         .slice(6)
                         .trim();
 
-                if (
-                    !descricao
-                ) {
+                if (!descricao) {
                     await sendText(
                         from,
-                        `❌ Faltou a descrição.\n\n` +
-                        `Responda a uma figurinha assim:\n` +
-                        `/texto rk da miis`
+                        `❌ Faltou a descrição.\n\nResponda a uma figurinha assim:\n/texto rk da miis`
                     );
 
                     return;
@@ -1215,14 +1181,10 @@ app.post(
                     repliedMessageId
                 );
 
-                if (
-                    !repliedMessageId
-                ) {
+                if (!repliedMessageId) {
                     await sendText(
                         from,
-                        `❌ Você precisa responder diretamente a uma figurinha.\n\n` +
-                        `Exemplo:\n` +
-                        `/texto rk da miis`
+                        `❌ Você precisa responder diretamente a uma figurinha.\n\nExemplo:\n/texto rk da miis`
                     );
 
                     return;
@@ -1238,13 +1200,10 @@ app.post(
                     originalSticker
                 );
 
-                if (
-                    !originalSticker
-                ) {
+                if (!originalSticker) {
                     await sendText(
                         from,
-                        `❌ Não encontrei essa figurinha na memória do bot.\n\n` +
-                        `Envie a figurinha novamente e responda a ela.`
+                        `❌ Não encontrei essa figurinha na memória do bot.\n\nEnvie a figurinha novamente e responda a ela.`
                     );
 
                     return;
@@ -1298,7 +1257,7 @@ app.post(
                         error.response
                     ) {
                         console.error(
-                            "[TEXTO] API response:",
+                            "[TEXTO] API:",
                             error.response.data
                         );
                     }
@@ -1322,7 +1281,7 @@ app.post(
             ) {
                 await sendText(
                     from,
-                    `📸 Para criar uma figurinha, envie a foto com /fig na legenda.\n\nExemplo: envie a foto e coloque /fig na legenda.`
+                    `📸 Para criar uma figurinha, envie uma foto com /fig na legenda.`
                 );
 
                 return;
@@ -1338,7 +1297,7 @@ app.post(
             ) {
                 await sendText(
                     from,
-                    `🎬 Para criar uma figurinha animada, envie o vídeo com /gif na legenda.`
+                    `🎬 Para criar uma figurinha animada, envie um vídeo com /gif na legenda.`
                 );
 
                 return;
@@ -1349,16 +1308,12 @@ app.post(
             // ====================================================
 
             if (
-                lowerText.startsWith(
-                    "/"
-                )
+                lowerText.startsWith("/")
             ) {
                 await sendText(
                     from,
                     `❌ Comando não reconhecido.\n\nDigite /ajuda para ver os comandos disponíveis.`
                 );
-
-                return;
             }
 
         } catch (
@@ -1391,7 +1346,7 @@ app.get(
 );
 
 // ============================================================
-// INICIAR SERVIDOR
+// SERVIDOR
 // ============================================================
 
 app.listen(
