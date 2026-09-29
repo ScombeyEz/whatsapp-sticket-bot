@@ -17,23 +17,145 @@ const PORT = process.env.PORT || 3000;
 const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
+const OWNER_NUMBER = process.env.OWNER_NUMBER;
 
 const GRAPH_URL = `https://graph.facebook.com/v23.0/${PHONE_NUMBER_ID}`;
 
 const DAILY_LIMIT = 10;
 
-// ===============================
-// CONTROLE DE USUÁRIOS
-// ===============================
+// ============================================================
+// USUÁRIOS
+// ============================================================
 
 const users = new Map();
-
-// Usuários liberados pelo comando secreto.
-// Volta a ficar vazio quando o bot reinicia.
 const unlimitedUsers = new Set();
 
+// ============================================================
+// ESTATÍSTICAS
+// ============================================================
+
+const allUsers = new Set();
+const dailyUsers = new Set();
+
+const stats = {
+    totalStickers: 0,
+    totalFig: 0,
+    totalGif: 0,
+
+    dailyStickers: 0,
+    dailyFig: 0,
+    dailyGif: 0,
+
+    date: getBrazilDate()
+};
+
+// ============================================================
+// FIGURINHAS RECEBIDAS
+// ============================================================
+
+// Guarda a relação:
+// ID da mensagem do WhatsApp -> ID da mídia da figurinha
+//
+// Isso permite que:
+// o usuário responda uma figurinha
+// e use /texto alguma coisa
+
+const stickerMessages = new Map();
+
+const MAX_STORED_STICKERS = 1000;
+
+// ============================================================
+// DATA DO BRASIL
+// ============================================================
+
+function getBrazilDate() {
+    return new Intl.DateTimeFormat("en-CA", {
+        timeZone: "America/Sao_Paulo"
+    }).format(new Date());
+}
+
+// ============================================================
+// RESET DAS ESTATÍSTICAS DIÁRIAS
+// ============================================================
+
+function resetDailyStatsIfNeeded() {
+    const today = getBrazilDate();
+
+    if (stats.date !== today) {
+        stats.date = today;
+
+        stats.dailyStickers = 0;
+        stats.dailyFig = 0;
+        stats.dailyGif = 0;
+
+        dailyUsers.clear();
+    }
+}
+
+// ============================================================
+// REGISTRAR USUÁRIO
+// ============================================================
+
+function registerUser(userId) {
+    resetDailyStatsIfNeeded();
+
+    allUsers.add(userId);
+    dailyUsers.add(userId);
+}
+
+// ============================================================
+// REGISTRAR FIGURINHA CRIADA
+// ============================================================
+
+function registerSticker(type) {
+    resetDailyStatsIfNeeded();
+
+    stats.totalStickers++;
+    stats.dailyStickers++;
+
+    if (type === "fig") {
+        stats.totalFig++;
+        stats.dailyFig++;
+    }
+
+    if (type === "gif") {
+        stats.totalGif++;
+        stats.dailyGif++;
+    }
+}
+
+// ============================================================
+// GUARDAR FIGURINHA
+// ============================================================
+
+function rememberSticker(messageId, mediaId, animated) {
+    if (!messageId || !mediaId) {
+        return;
+    }
+
+    stickerMessages.set(messageId, {
+        mediaId,
+        animated: animated === true,
+        createdAt: Date.now()
+    });
+
+    // Evita crescimento infinito da memória
+    if (stickerMessages.size > MAX_STORED_STICKERS) {
+        const firstKey =
+            stickerMessages.keys().next().value;
+
+        if (firstKey) {
+            stickerMessages.delete(firstKey);
+        }
+    }
+}
+
+// ============================================================
+// DADOS DO USUÁRIO / LIMITE
+// ============================================================
+
 function getUserData(userId) {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = getBrazilDate();
 
     if (!users.has(userId)) {
         users.set(userId, {
@@ -53,8 +175,6 @@ function getUserData(userId) {
 }
 
 function canUseCommand(userId) {
-
-    // Usuário liberado pelo comando secreto
     if (unlimitedUsers.has(userId)) {
         return true;
     }
@@ -70,793 +190,1206 @@ function canUseCommand(userId) {
     return true;
 }
 
-// ===============================
-// ENVIO DE TEXTO
-// ===============================
+// ============================================================
+// ENVIAR TEXTO
+// ============================================================
 
 async function sendText(to, text) {
-    try {
-        await axios.post(
-            `${GRAPH_URL}/messages`,
-            {
-                messaging_product: "whatsapp",
-                to: to,
-                type: "text",
-                text: {
-                    body: text
-                }
-            },
-            {
-                headers: {
-                    Authorization: `Bearer ${WHATSAPP_TOKEN}`,
-                    "Content-Type": "application/json"
-                }
+    await axios.post(
+        `${GRAPH_URL}/messages`,
+        {
+            messaging_product: "whatsapp",
+            to,
+            type: "text",
+            text: {
+                body: text
             }
-        );
-
-        console.log(`Mensagem enviada para ${to}`);
-
-    } catch (error) {
-
-        console.error(
-            "ERRO AO ENVIAR MENSAGEM:",
-            error.response?.data || error.message
-        );
-    }
+        },
+        {
+            headers: {
+                Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+                "Content-Type": "application/json"
+            }
+        }
+    );
 }
 
-// ===============================
+// ============================================================
 // DOWNLOAD DE MÍDIA
-// ===============================
+// ============================================================
 
 async function downloadMedia(mediaId) {
-    try {
-
-        const mediaInfo = await axios.get(
-            `https://graph.facebook.com/v23.0/${mediaId}`,
-            {
-                headers: {
-                    Authorization: `Bearer ${WHATSAPP_TOKEN}`
-                }
+    const mediaInfo = await axios.get(
+        `https://graph.facebook.com/v23.0/${mediaId}`,
+        {
+            headers: {
+                Authorization: `Bearer ${WHATSAPP_TOKEN}`
             }
-        );
+        }
+    );
 
-        const mediaUrl = mediaInfo.data.url;
+    const mediaUrl = mediaInfo.data.url;
 
-        const media = await axios.get(
-            mediaUrl,
-            {
-                responseType: "arraybuffer",
-                headers: {
-                    Authorization: `Bearer ${WHATSAPP_TOKEN}`
-                }
+    const response = await axios.get(
+        mediaUrl,
+        {
+            responseType: "arraybuffer",
+            headers: {
+                Authorization: `Bearer ${WHATSAPP_TOKEN}`
             }
-        );
+        }
+    );
 
-        return Buffer.from(media.data);
-
-    } catch (error) {
-
-        console.error(
-            "ERRO AO BAIXAR MÍDIA:",
-            error.response?.data || error.message
-        );
-
-        throw error;
-    }
+    return Buffer.from(response.data);
 }
 
-// ===============================
-// UPLOAD DA FIGURINHA
-// ===============================
+// ============================================================
+// UPLOAD DE MÍDIA
+// ============================================================
 
 async function uploadMedia(buffer, mimeType) {
+    const form = new FormData();
 
-    try {
+    form.append(
+        "messaging_product",
+        "whatsapp"
+    );
 
-        const form = new FormData();
+    form.append(
+        "file",
+        buffer,
+        {
+            filename: "sticker.webp",
+            contentType: mimeType
+        }
+    );
 
-        form.append(
-            "messaging_product",
-            "whatsapp"
-        );
-
-        form.append(
-            "file",
-            buffer,
-            {
-                filename: "sticker.webp",
-                contentType: mimeType
+    const response = await axios.post(
+        `${GRAPH_URL}/media`,
+        form,
+        {
+            headers: {
+                Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+                ...form.getHeaders()
             }
-        );
+        }
+    );
 
-        const response = await axios.post(
-            `https://graph.facebook.com/v23.0/${PHONE_NUMBER_ID}/media`,
-            form,
-            {
-                headers: {
-                    Authorization: `Bearer ${WHATSAPP_TOKEN}`,
-                    ...form.getHeaders()
-                }
-            }
-        );
-
-        console.log("Mídia enviada para a Meta.");
-
-        return response.data.id;
-
-    } catch (error) {
-
-        console.error(
-            "ERRO NO UPLOAD:",
-            error.response?.data || error.message
-        );
-
-        throw error;
-    }
+    return response.data.id;
 }
 
-// ===============================
-// ENVIO DE FIGURINHA
-// ===============================
+// ============================================================
+// ENVIAR FIGURINHA
+// ============================================================
 
 async function sendSticker(to, stickerBuffer) {
+    const mediaId = await uploadMedia(
+        stickerBuffer,
+        "image/webp"
+    );
 
-    try {
-
-        const mediaId = await uploadMedia(
-            stickerBuffer,
-            "image/webp"
-        );
-
-        await axios.post(
-            `${GRAPH_URL}/messages`,
-            {
-                messaging_product: "whatsapp",
-                to: to,
-                type: "sticker",
-                sticker: {
-                    id: mediaId
-                }
-            },
-            {
-                headers: {
-                    Authorization: `Bearer ${WHATSAPP_TOKEN}`,
-                    "Content-Type": "application/json"
-                }
+    const response = await axios.post(
+        `${GRAPH_URL}/messages`,
+        {
+            messaging_product: "whatsapp",
+            to,
+            type: "sticker",
+            sticker: {
+                id: mediaId
             }
-        );
+        },
+        {
+            headers: {
+                Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+                "Content-Type": "application/json"
+            }
+        }
+    );
 
-        console.log(
-            `Figurinha enviada para ${to}`
-        );
-
-    } catch (error) {
-
-        console.error(
-            "ERRO AO ENVIAR FIGURINHA:",
-            error.response?.data || error.message
-        );
-
-        throw error;
-    }
+    return response.data;
 }
 
-// ===============================
-// FOTO → FIGURINHA
-// ===============================
+// ============================================================
+// FOTO -> STICKER
+// ============================================================
 
 async function imageToSticker(buffer) {
-
     return await sharp(buffer)
-
-        .resize(512, 512, {
-            fit: "contain",
-            background: {
-                r: 0,
-                g: 0,
-                b: 0,
-                alpha: 0
+        .resize(
+            512,
+            512,
+            {
+                fit: "contain",
+                background: {
+                    r: 0,
+                    g: 0,
+                    b: 0,
+                    alpha: 0
+                }
             }
-        })
-
+        )
         .webp({
             quality: 80
         })
-
         .toBuffer();
 }
 
-// ===============================
-// VÍDEO → FIGURINHA ANIMADA
-// ===============================
+// ============================================================
+// VÍDEO -> STICKER ANIMADO
+// ============================================================
 
 async function videoToAnimatedSticker(buffer) {
+    const tempDir =
+        await fs.promises.mkdtemp(
+            path.join(
+                os.tmpdir(),
+                "whatsapp-sticker-"
+            )
+        );
 
-    const tempDir = await fs.promises.mkdtemp(
-        path.join(os.tmpdir(), "whatsapp-sticker-")
+    const inputPath =
+        path.join(
+            tempDir,
+            "input"
+        );
+
+    const outputPath =
+        path.join(
+            tempDir,
+            "output.webp"
+        );
+
+    await fs.promises.writeFile(
+        inputPath,
+        buffer
     );
 
-    const inputPath = path.join(
-        tempDir,
-        "input.mp4"
-    );
+    const runFFmpeg = (
+        fps,
+        quality
+    ) => {
+        return new Promise(
+            (resolve, reject) => {
+                ffmpeg(inputPath)
+                    .outputOptions([
+                        "-t",
+                        "10",
 
-    const outputPath = path.join(
-        tempDir,
-        "sticker.webp"
-    );
+                        "-vf",
+                        `fps=${fps},scale=512:512:force_original_aspect_ratio=decrease,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=black@0`,
+
+                        "-an",
+
+                        "-loop",
+                        "0",
+
+                        "-c:v",
+                        "libwebp",
+
+                        "-q:v",
+                        String(quality),
+
+                        "-compression_level",
+                        "6",
+
+                        "-preset",
+                        "picture"
+                    ])
+                    .format("webp")
+                    .on(
+                        "end",
+                        resolve
+                    )
+                    .on(
+                        "error",
+                        reject
+                    )
+                    .save(outputPath);
+            }
+        );
+    };
 
     try {
-
-        await fs.promises.writeFile(
-            inputPath,
-            buffer
+        await runFFmpeg(
+            10,
+            45
         );
 
-        console.log(
-            "Vídeo salvo temporariamente:",
-            inputPath
-        );
-
-        await new Promise((resolve, reject) => {
-
-            ffmpeg(inputPath)
-
-                .outputOptions([
-                    "-t 10",
-                    "-an",
-                    "-loop 0",
-                    "-compression_level 6"
-                ])
-
-                .videoFilters([
-                    "fps=10",
-                    "scale=512:512:force_original_aspect_ratio=decrease",
-                    "pad=512:512:(ow-iw)/2:(oh-ih)/2:color=black@0"
-                ])
-
-                .videoCodec("libwebp")
-
-                .outputOptions([
-                    "-q:v 50"
-                ])
-
-                .format("webp")
-
-                .on("start", command => {
-
-                    console.log(
-                        "FFmpeg iniciado:"
-                    );
-
-                    console.log(command);
-                })
-
-                .on("progress", progress => {
-
-                    if (progress.percent) {
-
-                        console.log(
-                            `Conversão: ${Math.round(progress.percent)}%`
-                        );
-                    }
-                })
-
-                .on("end", () => {
-
-                    console.log(
-                        "Conversão concluída."
-                    );
-
-                    resolve();
-                })
-
-                .on("error", error => {
-
-                    console.error(
-                        "ERRO DO FFMPEG:",
-                        error.message
-                    );
-
-                    reject(error);
-                })
-
-                .save(outputPath);
-        });
-
-        let stickerBuffer =
+        let result =
             await fs.promises.readFile(
                 outputPath
             );
 
-        if (stickerBuffer.length > 500 * 1024) {
-
-            console.log(
-                `Sticker ficou grande: ${Math.round(stickerBuffer.length / 1024)} KB`
+        if (
+            result.length >
+            500 * 1024
+        ) {
+            await runFFmpeg(
+                8,
+                60
             );
 
-            await new Promise((resolve, reject) => {
-
-                ffmpeg(inputPath)
-
-                    .outputOptions([
-                        "-t 10",
-                        "-an",
-                        "-loop 0",
-                        "-compression_level 6"
-                    ])
-
-                    .videoFilters([
-                        "fps=8",
-                        "scale=512:512:force_original_aspect_ratio=decrease",
-                        "pad=512:512:(ow-iw)/2:(oh-ih)/2:color=black@0"
-                    ])
-
-                    .videoCodec("libwebp")
-
-                    .outputOptions([
-                        "-q:v 30"
-                    ])
-
-                    .format("webp")
-
-                    .on("end", resolve)
-
-                    .on("error", reject)
-
-                    .save(outputPath);
-            });
-
-            stickerBuffer =
+            result =
                 await fs.promises.readFile(
                     outputPath
                 );
         }
 
-        if (stickerBuffer.length > 500 * 1024) {
-
-            throw new Error(
-                "O vídeo ficou maior que 500 KB mesmo após a compressão."
-            );
-        }
-
-        console.log(
-            `Sticker animado final: ${Math.round(stickerBuffer.length / 1024)} KB`
-        );
-
-        return stickerBuffer;
+        return result;
 
     } finally {
-
-        try {
-
-            await fs.promises.rm(
-                tempDir,
-                {
-                    recursive: true,
-                    force: true
-                }
-            );
-
-            console.log(
-                "Arquivos temporários removidos."
-            );
-
-        } catch (cleanupError) {
-
-            console.error(
-                "Erro ao limpar arquivos temporários:",
-                cleanupError.message
-            );
-        }
+        await fs.promises.rm(
+            tempDir,
+            {
+                recursive: true,
+                force: true
+            }
+        );
     }
 }
 
-// ===============================
-// VERIFICAÇÃO DO WEBHOOK
-// ===============================
+// ============================================================
+// ESCAPAR XML
+// ============================================================
 
-app.get("/webhook", (req, res) => {
-
-    const mode =
-        req.query["hub.mode"];
-
-    const token =
-        req.query["hub.verify_token"];
-
-    const challenge =
-        req.query["hub.challenge"];
-
-    console.log(
-        "Tentativa de verificação do webhook."
-    );
-
-    if (
-        mode === "subscribe" &&
-        token === VERIFY_TOKEN
-    ) {
-
-        console.log(
-            "Webhook verificado pela Meta."
+function escapeXml(text) {
+    return text
+        .replace(
+            /&/g,
+            "&amp;"
+        )
+        .replace(
+            /</g,
+            "&lt;"
+        )
+        .replace(
+            />/g,
+            "&gt;"
+        )
+        .replace(
+            /"/g,
+            "&quot;"
+        )
+        .replace(
+            /'/g,
+            "&apos;"
         );
+}
 
-        return res
-            .status(200)
-            .send(challenge);
+// ============================================================
+// QUEBRA DE TEXTO
+// ============================================================
+
+function wrapText(
+    text,
+    maxChars
+) {
+    const words =
+        text.split(/\s+/);
+
+    const lines = [];
+
+    let current = "";
+
+    for (
+        const word of words
+    ) {
+        if (!current) {
+            current = word;
+            continue;
+        }
+
+        const test =
+            `${current} ${word}`;
+
+        if (
+            test.length <=
+            maxChars
+        ) {
+            current = test;
+        } else {
+            lines.push(current);
+            current = word;
+        }
     }
 
-    console.log(
-        "Falha na verificação do webhook."
+    if (current) {
+        lines.push(current);
+    }
+
+    return lines.slice(
+        0,
+        5
+    );
+}
+
+// ============================================================
+// CRIAR TEXTO SVG
+// ============================================================
+
+function createTextSvg(
+    text,
+    width = 512,
+    height = 512
+) {
+    const safeText =
+        escapeXml(text);
+
+    const lines =
+        wrapText(
+            safeText,
+            22
+        );
+
+    const fontSize =
+        lines.length >= 4
+            ? 40
+            : lines.length >= 3
+                ? 46
+                : 52;
+
+    const lineHeight =
+        fontSize + 8;
+
+    const totalHeight =
+        lines.length *
+        lineHeight;
+
+    const startY =
+        height -
+        totalHeight -
+        35;
+
+    let textElements = "";
+
+    lines.forEach(
+        (
+            line,
+            index
+        ) => {
+            const y =
+                startY +
+                index *
+                lineHeight;
+
+            textElements += `
+                <text
+                    x="50%"
+                    y="${y}"
+                    text-anchor="middle"
+                    font-family="Arial, DejaVu Sans, sans-serif"
+                    font-size="${fontSize}px"
+                    font-weight="bold"
+                    fill="white"
+                    stroke="black"
+                    stroke-width="10"
+                    stroke-linejoin="round"
+                    paint-order="stroke fill"
+                >${line}</text>
+            `;
+        }
     );
 
-    return res.sendStatus(403);
-});
+    return `
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="${width}"
+            height="${height}"
+        >
+            ${textElements}
+        </svg>
+    `;
+}
 
-// ===============================
-// RECEBIMENTO DO WEBHOOK
-// ===============================
+// ============================================================
+// TEXTO EM STICKER ESTÁTICO
+// ============================================================
 
-app.post("/webhook", async (req, res) => {
+async function addTextToStaticSticker(
+    buffer,
+    text
+) {
+    const metadata =
+        await sharp(buffer)
+            .metadata();
 
-    console.log("");
-    console.log("====================================");
-    console.log(" WEBHOOK RECEBIDO!");
-    console.log("====================================");
+    const width =
+        metadata.width ||
+        512;
 
-    console.log(
-        JSON.stringify(
-            req.body,
-            null,
-            2
-        )
-    );
+    const height =
+        metadata.height ||
+        512;
 
-    console.log("====================================");
-    console.log("");
+    const svg =
+        createTextSvg(
+            text,
+            width,
+            height
+        );
 
-    res.sendStatus(200);
+    return await sharp(buffer)
+        .composite([
+            {
+                input:
+                    Buffer.from(svg),
+                top: 0,
+                left: 0
+            }
+        ])
+        .webp({
+            quality: 80
+        })
+        .toBuffer();
+}
+
+// ============================================================
+// TEXTO EM STICKER ANIMADO
+// ============================================================
+
+async function addTextToAnimatedSticker(
+    buffer,
+    text
+) {
+    const tempDir =
+        await fs.promises.mkdtemp(
+            path.join(
+                os.tmpdir(),
+                "sticker-text-"
+            )
+        );
+
+    const inputPath =
+        path.join(
+            tempDir,
+            "input.webp"
+        );
+
+    const overlayPath =
+        path.join(
+            tempDir,
+            "text.png"
+        );
+
+    const outputPath =
+        path.join(
+            tempDir,
+            "output.webp"
+        );
 
     try {
-
-        const entry =
-            req.body.entry?.[0];
-
-        const changes =
-            entry?.changes?.[0];
-
-        const value =
-            changes?.value;
-
-        const message =
-            value?.messages?.[0];
-
-        if (!message) {
-
-            console.log(
-                "Webhook recebido sem mensagem."
-            );
-
-            return;
-        }
-
-        const from =
-            message.from;
-
-        console.log(
-            `Mensagem recebida de: ${from}`
+        await fs.promises.writeFile(
+            inputPath,
+            buffer
         );
 
-        console.log(
-            `Tipo: ${message.type}`
+        const svg =
+            createTextSvg(
+                text,
+                512,
+                512
+            );
+
+        const overlay =
+            await sharp(
+                Buffer.from(svg)
+            )
+                .png()
+                .toBuffer();
+
+        await fs.promises.writeFile(
+            overlayPath,
+            overlay
         );
 
-        // ===============================
-        // TEXTO
-        // ===============================
+        const runFFmpeg = (
+            quality
+        ) => {
+            return new Promise(
+                (
+                    resolve,
+                    reject
+                ) => {
+                    ffmpeg()
+                        .input(inputPath)
 
-        if (message.type === "text") {
+                        .input(
+                            overlayPath
+                        )
 
-            const text =
-                message.text?.body?.trim();
+                        .inputOptions([
+                            "-loop",
+                            "1"
+                        ])
 
-            if (!text) {
-                return;
-            }
+                        .complexFilter([
+                            "[1:v]format=rgba[text]",
+                            "[0:v][text]overlay=0:0:shortest=1"
+                        ])
 
-            const command =
-                text.toLowerCase();
+                        .outputOptions([
+                            "-an",
 
-            console.log(
-                `Texto recebido: ${command}`
+                            "-loop",
+                            "0",
+
+                            "-c:v",
+                            "libwebp",
+
+                            "-q:v",
+                            String(
+                                quality
+                            ),
+
+                            "-compression_level",
+                            "6",
+
+                            "-preset",
+                            "picture"
+                        ])
+
+                        .format("webp")
+
+                        .on(
+                            "end",
+                            resolve
+                        )
+
+                        .on(
+                            "error",
+                            reject
+                        )
+
+                        .save(
+                            outputPath
+                        );
+                }
+            );
+        };
+
+        await runFFmpeg(
+            50
+        );
+
+        let result =
+            await fs.promises.readFile(
+                outputPath
             );
 
-            // ===============================
-            // COMANDO SECRETO
-            // ===============================
-
-            if (command === "/rkdamirella") {
-
-                unlimitedUsers.add(from);
-
-                console.log(
-                    `Usuário ${from} liberado para uso ilimitado.`
-                );
-
-                return;
-            }
-
-            // ===============================
-            // /AJUDA
-            // ===============================
-
-            if (
-                command === "/ajuda" ||
-                command === "/help"
-            ) {
-
-                await sendText(
-                    from,
-                    `🤖 BOT DE FIGURINHAS
-
-Comandos disponíveis:
-
-/fig — envie uma foto com /fig para transformar em figurinha.
-
-/gif — envie um vídeo com /gif para transformar em figurinha.
-
-Limite diário: ${DAILY_LIMIT} comandos por usuário.
-
-Exemplo:
-Envie uma foto com a legenda /fig`
-                );
-
-                return;
-            }
-
-            // ===============================
-            // /FIG
-            // ===============================
-
-            if (command === "/fig") {
-
-                await sendText(
-                    from,
-                    "📸 Envie uma foto com a legenda /fig para transformá-la em figurinha."
-                );
-
-                return;
-            }
-
-            // ===============================
-            // /GIF
-            // ===============================
-
-            if (command === "/gif") {
-
-                await sendText(
-                    from,
-                    "🎬 Envie um vídeo com a legenda /gif para transformá-lo em figurinha."
-                );
-
-                return;
-            }
-
-            // ===============================
-            // COMANDO DESCONHECIDO
-            // ===============================
-
-            await sendText(
-                from,
-                "❓ Comando não reconhecido.\n\nDigite /ajuda para ver os comandos."
+        if (
+            result.length >
+            500 * 1024
+        ) {
+            await runFFmpeg(
+                65
             );
 
-            return;
+            result =
+                await fs.promises.readFile(
+                    outputPath
+                );
         }
 
-        // ===============================
-        // IMAGEM
-        // ===============================
+        return result;
 
-        if (message.type === "image") {
-
-            const caption =
-                message.image?.caption
-                    ?.trim()
-                    .toLowerCase();
-
-            console.log(
-                `Legenda da imagem: ${caption}`
-            );
-
-            if (caption !== "/fig") {
-
-                await sendText(
-                    from,
-                    "📸 Para transformar essa foto em figurinha, envie novamente com a legenda /fig."
-                );
-
-                return;
+    } finally {
+        await fs.promises.rm(
+            tempDir,
+            {
+                recursive: true,
+                force: true
             }
-
-            if (!canUseCommand(from)) {
-
-                await sendText(
-                    from,
-                    "⚠️ Você atingiu o limite de 10 comandos hoje. Tente novamente amanhã."
-                );
-
-                return;
-            }
-
-            await sendText(
-                from,
-                "⏳ Criando sua figurinha..."
-            );
-
-            const mediaId =
-                message.image?.id;
-
-            if (!mediaId) {
-
-                console.log(
-                    "Imagem recebida sem media ID."
-                );
-
-                return;
-            }
-
-            const original =
-                await downloadMedia(
-                    mediaId
-                );
-
-            const sticker =
-                await imageToSticker(
-                    original
-                );
-
-            await sendSticker(
-                from,
-                sticker
-            );
-
-            return;
-        }
-
-        // ===============================
-        // VÍDEO
-        // ===============================
-
-        if (message.type === "video") {
-
-            const caption =
-                message.video?.caption
-                    ?.trim()
-                    .toLowerCase();
-
-            console.log(
-                `Legenda do vídeo: ${caption}`
-            );
-
-            if (caption !== "/gif") {
-
-                await sendText(
-                    from,
-                    "🎬 Para transformar esse vídeo em figurinha, envie novamente com a legenda /gif."
-                );
-
-                return;
-            }
-
-            if (!canUseCommand(from)) {
-
-                await sendText(
-                    from,
-                    "⚠️ Você atingiu o limite de 10 comandos hoje. Tente novamente amanhã."
-                );
-
-                return;
-            }
-
-            await sendText(
-                from,
-                "⏳ Recebi o vídeo! Estou criando sua figurinha animada..."
-            );
-
-            const mediaId =
-                message.video?.id;
-
-            if (!mediaId) {
-
-                console.log(
-                    "Vídeo recebido sem media ID."
-                );
-
-                return;
-            }
-
-            try {
-
-                const original =
-                    await downloadMedia(
-                        mediaId
-                    );
-
-                console.log(
-                    `Vídeo baixado: ${Math.round(original.length / 1024)} KB`
-                );
-
-                const sticker =
-                    await videoToAnimatedSticker(
-                        original
-                    );
-
-                await sendSticker(
-                    from,
-                    sticker
-                );
-
-                console.log(
-                    "Figurinha animada enviada com sucesso!"
-                );
-
-            } catch (gifError) {
-
-                console.error(
-                    "ERRO AO PROCESSAR GIF:",
-                    gifError.message
-                );
-
-                await sendText(
-                    from,
-                    "❌ Não consegui transformar esse vídeo em figurinha. Tente um vídeo de até 10 segundos."
-                );
-            }
-
-            return;
-        }
-
-    } catch (error) {
-
-        console.error(
-            "ERRO PROCESSANDO WEBHOOK:",
-            error.response?.data || error.message
         );
     }
-});
+}
 
-// ===============================
+// ============================================================
+// WEBHOOK GET - VERIFICAÇÃO META
+// ============================================================
+
+app.get(
+    "/webhook",
+    (
+        req,
+        res
+    ) => {
+        const mode =
+            req.query[
+                "hub.mode"
+            ];
+
+        const token =
+            req.query[
+                "hub.verify_token"
+            ];
+
+        const challenge =
+            req.query[
+                "hub.challenge"
+            ];
+
+        if (
+            mode === "subscribe" &&
+            token === VERIFY_TOKEN
+        ) {
+            console.log(
+                "Webhook verificado com sucesso."
+            );
+
+            return res
+                .status(200)
+                .send(challenge);
+        }
+
+        return res
+            .sendStatus(403);
+    }
+);
+
+// ============================================================
+// WEBHOOK POST
+// ============================================================
+
+app.post(
+    "/webhook",
+    async (
+        req,
+        res
+    ) => {
+
+        console.log(
+            "Webhook recebido:",
+            JSON.stringify(
+                req.body,
+                null,
+                2
+            )
+        );
+
+        // Responde para a Meta imediatamente
+        res.sendStatus(200);
+
+        try {
+            const entry =
+                req.body?.entry?.[0];
+
+            const change =
+                entry?.changes?.[0];
+
+            const value =
+                change?.value;
+
+            const message =
+                value?.messages?.[0];
+
+            if (!message) {
+                return;
+            }
+
+            const from =
+                message.from;
+
+            registerUser(from);
+
+            // ====================================================
+            // RECEBEU UMA FIGURINHA
+            // ====================================================
+
+            if (
+                message.type ===
+                "sticker"
+            ) {
+                const sticker =
+                    message.sticker;
+
+                if (
+                    sticker?.id
+                ) {
+                    rememberSticker(
+                        message.id,
+                        sticker.id,
+                        sticker.animated === true
+                    );
+                }
+
+                return;
+            }
+
+            // ====================================================
+            // RECEBEU UMA IMAGEM
+            // ====================================================
+
+            if (
+                message.type ===
+                "image"
+            ) {
+                const caption =
+                    message.image?.caption
+                        ?.trim()
+                        .toLowerCase() || "";
+
+                if (
+                    caption !==
+                    "/fig"
+                ) {
+                    return;
+                }
+
+                if (
+                    !canUseCommand(
+                        from
+                    )
+                ) {
+                    await sendText(
+                        from,
+                        `❌ Você atingiu o limite diário de ${DAILY_LIMIT} comandos /fig + /gif.\n\n` +
+                        `O limite será renovado automaticamente à meia-noite.`
+                    );
+
+                    return;
+                }
+
+                try {
+                    await sendText(
+                        from,
+                        "⏳ Processando sua figurinha..."
+                    );
+
+                    const buffer =
+                        await downloadMedia(
+                            message.image.id
+                        );
+
+                    const sticker =
+                        await imageToSticker(
+                            buffer
+                        );
+
+                    const result =
+                        await sendSticker(
+                            from,
+                            sticker
+                        );
+
+                    registerSticker(
+                        "fig"
+                    );
+
+                    // Guarda a figurinha enviada pelo bot
+                    const sentMessageId =
+                        result?.messages?.[0]?.id;
+
+                    if (
+                        sentMessageId
+                    ) {
+                        // A mídia enviada pelo bot é a mesma que foi criada
+                        // localmente. Não precisamos dela para o /texto
+                        // caso o usuário responda à figurinha original.
+                    }
+
+                } catch (error) {
+                    console.error(
+                        "Erro no /fig:",
+                        error.response?.data ||
+                        error.message ||
+                        error
+                    );
+
+                    await sendText(
+                        from,
+                        "❌ Não consegui transformar essa imagem em figurinha."
+                    );
+                }
+
+                return;
+            }
+
+            // ====================================================
+            // RECEBEU VÍDEO
+            // ====================================================
+
+            if (
+                message.type ===
+                "video"
+            ) {
+                const caption =
+                    message.video?.caption
+                        ?.trim()
+                        .toLowerCase() || "";
+
+                if (
+                    caption !==
+                    "/gif"
+                ) {
+                    return;
+                }
+
+                if (
+                    !canUseCommand(
+                        from
+                    )
+                ) {
+                    await sendText(
+                        from,
+                        `❌ Você atingiu o limite diário de ${DAILY_LIMIT} comandos /fig + /gif.\n\n` +
+                        `O limite será renovado automaticamente à meia-noite.`
+                    );
+
+                    return;
+                }
+
+                try {
+                    await sendText(
+                        from,
+                        "⏳ Processando sua figurinha animada..."
+                    );
+
+                    const buffer =
+                        await downloadMedia(
+                            message.video.id
+                        );
+
+                    const sticker =
+                        await videoToAnimatedSticker(
+                            buffer
+                        );
+
+                    await sendSticker(
+                        from,
+                        sticker
+                    );
+
+                    registerSticker(
+                        "gif"
+                    );
+
+                } catch (error) {
+                    console.error(
+                        "Erro no /gif:",
+                        error.response?.data ||
+                        error.message ||
+                        error
+                    );
+
+                    await sendText(
+                        from,
+                        "❌ Não consegui transformar esse vídeo em figurinha animada."
+                    );
+                }
+
+                return;
+            }
+
+            // ====================================================
+            // SÓ PROCESSA TEXTO A PARTIR DAQUI
+            // ====================================================
+
+            if (
+                message.type !==
+                "text"
+            ) {
+                return;
+            }
+
+            const text =
+                message.text?.body
+                    ?.trim() || "";
+
+            const lowerText =
+                text.toLowerCase();
+
+            // ====================================================
+            // /ACESSOS
+            // ====================================================
+
+            if (
+                lowerText ===
+                "/acessos"
+            ) {
+
+                // Somente o desenvolvedor
+                if (
+                    from !==
+                    OWNER_NUMBER
+                ) {
+                    return;
+                }
+
+                resetDailyStatsIfNeeded();
+
+                const mensagem =
+                    `📊 ESTATÍSTICAS DO BOT\n\n` +
+
+                    `👥 Usuários hoje: ${dailyUsers.size}\n` +
+                    `👥 Usuários totais: ${allUsers.size}\n\n` +
+
+                    `🎨 Figurinhas hoje: ${stats.dailyStickers}\n` +
+                    `🎨 Figurinhas totais: ${stats.totalStickers}\n\n` +
+
+                    `🖼️ /fig hoje: ${stats.dailyFig}\n` +
+                    `🖼️ /fig total: ${stats.totalFig}\n\n` +
+
+                    `🎬 /gif hoje: ${stats.dailyGif}\n` +
+                    `🎬 /gif total: ${stats.totalGif}`;
+
+                await sendText(
+                    from,
+                    mensagem
+                );
+
+                return;
+            }
+
+            // ====================================================
+            // /RKDAMIRELLA
+            // ====================================================
+
+            if (
+                lowerText ===
+                "/rkdamirella"
+            ) {
+                unlimitedUsers.add(
+                    from
+                );
+
+                return;
+            }
+
+            // ====================================================
+            // /AJUDA
+            // ====================================================
+
+            if (
+                lowerText ===
+                    "/ajuda" ||
+                lowerText ===
+                    "/help"
+            ) {
+                await sendText(
+                    from,
+                    `🤖 COMANDOS DO BOT\n\n` +
+
+                    `/fig — envie uma foto com /fig para transformar em figurinha.\n\n` +
+
+                    `/gif — envie um vídeo com /gif para transformar em figurinha animada.\n\n` +
+
+                    `/texto — responda a uma figurinha com /texto seguido do texto desejado.\n\n` +
+
+                    `⚠️ Limite diário: ${DAILY_LIMIT} comandos /fig + /gif.`
+                );
+
+                return;
+            }
+
+            // ====================================================
+            // /TEXTO
+            // ====================================================
+
+            if (
+                lowerText ===
+                    "/texto" ||
+                lowerText.startsWith(
+                    "/texto "
+                )
+            ) {
+
+                const textToAdd =
+                    text
+                        .slice(6)
+                        .trim();
+
+                if (
+                    !textToAdd
+                ) {
+                    await sendText(
+                        from,
+                        `❌ Faltou o texto.\n\n` +
+                        `Responda a uma figurinha assim:\n\n` +
+                        `/texto seu texto aqui`
+                    );
+
+                    return;
+                }
+
+                // ID da mensagem que o usuário está respondendo
+                const repliedMessageId =
+                    message.context?.id;
+
+                if (
+                    !repliedMessageId
+                ) {
+                    await sendText(
+                        from,
+                        `❌ Você precisa responder diretamente a uma figurinha.\n\n` +
+                        `Exemplo:\n` +
+                        `/texto seu texto aqui`
+                    );
+
+                    return;
+                }
+
+                const originalSticker =
+                    stickerMessages.get(
+                        repliedMessageId
+                    );
+
+                if (
+                    !originalSticker
+                ) {
+                    await sendText(
+                        from,
+                        `❌ Não encontrei essa figurinha na memória do bot.\n\n` +
+                        `Tente enviar a figurinha novamente e depois responda a ela com /texto.`
+                    );
+
+                    return;
+                }
+
+                try {
+                    await sendText(
+                        from,
+                        "⏳ Adicionando o texto na figurinha..."
+                    );
+
+                    const originalBuffer =
+                        await downloadMedia(
+                            originalSticker.mediaId
+                        );
+
+                    let finalSticker;
+
+                    if (
+                        originalSticker.animated
+                    ) {
+                        finalSticker =
+                            await addTextToAnimatedSticker(
+                                originalBuffer,
+                                textToAdd
+                            );
+                    } else {
+                        finalSticker =
+                            await addTextToStaticSticker(
+                                originalBuffer,
+                                textToAdd
+                            );
+                    }
+
+                    await sendSticker(
+                        from,
+                        finalSticker
+                    );
+
+                } catch (error) {
+                    console.error(
+                        "Erro no /texto:",
+                        error.response?.data ||
+                        error.message ||
+                        error
+                    );
+
+                    await sendText(
+                        from,
+                        "❌ Não consegui adicionar o texto nessa figurinha."
+                    );
+                }
+
+                return;
+            }
+
+            // ====================================================
+            // TEXTO /FIG
+            // ====================================================
+
+            if (
+                lowerText ===
+                "/fig"
+            ) {
+                await sendText(
+                    from,
+                    `📸 Para criar uma figurinha, envie a foto com /fig na legenda.\n\nExemplo: envie a foto e coloque /fig na legenda.`
+                );
+
+                return;
+            }
+
+            // ====================================================
+            // TEXTO /GIF
+            // ====================================================
+
+            if (
+                lowerText ===
+                "/gif"
+            ) {
+                await sendText(
+                    from,
+                    `🎬 Para criar uma figurinha animada, envie o vídeo com /gif na legenda.`
+                );
+
+                return;
+            }
+
+            // ====================================================
+            // COMANDO DESCONHECIDO
+            // ====================================================
+
+            if (
+                lowerText.startsWith(
+                    "/"
+                )
+            ) {
+                await sendText(
+                    from,
+                    `❌ Comando não reconhecido.\n\nDigite /ajuda para ver os comandos disponíveis.`
+                );
+
+                return;
+            }
+
+        } catch (error) {
+            console.error(
+                "Erro geral no webhook:",
+                error.response?.data ||
+                error.message ||
+                error
+            );
+        }
+    }
+);
+
+// ============================================================
+// STATUS
+// ============================================================
+
+app.get(
+    "/",
+    (
+        req,
+        res
+    ) => {
+        res.status(200).send(
+            "WhatsApp Sticker Bot online."
+        );
+    }
+);
+
+// ============================================================
 // INICIAR SERVIDOR
-// ===============================
+// ============================================================
 
-app.listen(PORT, '0.0.0.0', () => {
+app.listen(
+    PORT,
+    "0.0.0.0",
+    () => {
+        console.log(
+            `Servidor iniciado na porta ${PORT}`
+        );
 
-    console.log(
-        "===================================="
-    );
+        console.log(
+            `Webhook: http://localhost:${PORT}/webhook`
+        );
 
-    console.log(
-        " BOT DE FIGURINHAS"
-    );
-
-    console.log(
-        " WhatsApp Cloud API"
-    );
-
-    console.log(
-        "===================================="
-    );
-
-    console.log(
-        `Servidor iniciado na porta ${PORT}`
-    );
-
-    console.log(
-        `Webhook: http://localhost:${PORT}/webhook`
-    );
-
-    console.log(
-        "===================================="
-    );
-});
+        console.log(
+            "WhatsApp Sticker Bot iniciado."
+        );
+    }
+);
