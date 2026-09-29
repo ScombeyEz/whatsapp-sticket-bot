@@ -640,15 +640,15 @@ async function videoToAnimatedSticker(
 }
 
 // ============================================================
-// ADICIONAR DESCRIÇÃO / AUTOR DA FIGURINHA
+// ADICIONAR METADADOS / DESCRIÇÃO DA FIGURINHA
 // ============================================================
 
-async function adicionarDescricao(
+async function setStickerMetadata(
     buffer,
     descricao
 ) {
     console.log(
-        "[TEXTO] Adicionando descrição:",
+        "[TEXTO] Aplicando metadados:",
         descricao
     );
 
@@ -661,15 +661,21 @@ async function adicionarDescricao(
         );
     }
 
-    const img =
+    const image =
         new webpmux.Image();
 
-    await img.load(
+    await image.load(
         buffer
     );
 
-    const exif =
-        {
+    /*
+     * Estrutura utilizada pelas figurinhas
+     * do WhatsApp para armazenar informações
+     * do pacote/autor.
+     */
+
+    const json =
+        JSON.stringify({
             "sticker-pack-id":
                 "com.rkdamirella.stickers",
 
@@ -679,98 +685,75 @@ async function adicionarDescricao(
             "sticker-pack-publisher":
                 "rk da miis",
 
-            "sticker-author-name":
-                descricao.trim()
-        };
-
-    const exifJson =
-        JSON.stringify(
-            exif
-        );
-
-    const exifBuffer =
-        Buffer.from(
-            exifJson
-        );
-
-    await img.save(
-        Buffer.from(
-            buffer
-        )
-    );
-
-    console.log(
-        "[TEXTO] Descrição adicionada com sucesso."
-    );
-
-    return buffer;
-}
-
-// ============================================================
-// CRIAR METADADOS DA FIGURINHA
-// ============================================================
-
-function createStickerExif(
-    packName
-) {
-    const json =
-        JSON.stringify({
-            "sticker-pack-id":
-                "com.rkdamirella.stickers",
-
-            "sticker-pack-name":
-                packName,
-
-            "sticker-pack-publisher":
-                "rk da miis",
-
-            "sticker-author-name":
-                packName
+            "emojis":
+                ["🤍"]
         });
 
-    return Buffer.from(
-        json
-    );
-}
-
-// ============================================================
-// ADICIONAR METADADOS REALMENTE AO WEBP
-// ============================================================
-
-async function setStickerMetadata(
-    buffer,
-    descricao
-) {
-    console.log(
-        "[TEXTO] Aplicando metadados:",
-        descricao
-    );
-
-    const image =
-        new webpmux.Image();
-
-    await image.load(
-        buffer
-    );
-
-    const exif =
-        createStickerExif(
-            descricao
+    const jsonBuffer =
+        Buffer.from(
+            json,
+            "utf8"
         );
 
     /*
-     * O WhatsApp utiliza EXIF para
-     * armazenar os dados do pacote
+     * Cabeçalho EXIF/TIFF utilizado
+     * para inserir o JSON nos metadados
      * da figurinha.
      */
-    await image.save(
-        {
-            exif
-        }
+
+    const exifHeader =
+        Buffer.from([
+            0x49, 0x49,
+            0x2A, 0x00,
+
+            0x08, 0x00,
+            0x00, 0x00,
+
+            0x01, 0x00,
+
+            0x41, 0x57,
+
+            0x07, 0x00,
+
+            0x00, 0x00,
+            0x00, 0x00,
+
+            0x16, 0x00,
+            0x00, 0x00,
+
+            0x00, 0x00,
+            0x00, 0x00
+        ]);
+
+    /*
+     * O tamanho do JSON fica armazenado
+     * na posição 14 do bloco EXIF.
+     */
+
+    exifHeader.writeUInt32LE(
+        jsonBuffer.length,
+        14
     );
 
+    const exif =
+        Buffer.concat([
+            exifHeader,
+            jsonBuffer
+        ]);
+
+    image.exif =
+        exif;
+
+    /*
+     * node-webpmux:
+     * save(null) retorna o WebP
+     * diretamente como Buffer.
+     */
+
     const result =
-        await image.saveBuffer();
+        await image.save(
+            null
+        );
 
     console.log(
         "[TEXTO] Metadados aplicados:",
