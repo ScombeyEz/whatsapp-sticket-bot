@@ -659,7 +659,7 @@ async function videoToAnimatedSticker(
 }
 
 // ============================================================
-// CRIAR EXIF DO WHATSAPP
+// CRIAR EXIF
 // ============================================================
 
 function createStickerExif(
@@ -672,9 +672,6 @@ function createStickerExif(
         "sticker-pack-name":
             descricao.trim(),
 
-        "sticker-pack-publisher":
-            "rk da miis",
-
         "emojis":
             ["🤍"]
     };
@@ -686,11 +683,6 @@ function createStickerExif(
             ),
             "utf8"
         );
-
-    /*
-     * Estrutura EXIF utilizada
-     * para metadados de stickers.
-     */
 
     const header =
         Buffer.from([
@@ -713,11 +705,6 @@ function createStickerExif(
             0x00, 0x00
         ]);
 
-    /*
-     * Os 4 bytes da posição 14
-     * recebem o tamanho do JSON.
-     */
-
     header.writeUInt32LE(
         jsonBuffer.length,
         14
@@ -725,6 +712,7 @@ function createStickerExif(
 
     return {
         metadata,
+
         exif:
             Buffer.concat([
                 header,
@@ -734,7 +722,7 @@ function createStickerExif(
 }
 
 // ============================================================
-// VERIFICAR EXIF AUTOMATICAMENTE
+// TESTE AUTOMÁTICO DOS METADADOS
 // ============================================================
 
 async function verifyStickerMetadata(
@@ -775,11 +763,6 @@ async function verifyStickerMetadata(
     const exif =
         image.exif;
 
-    /*
-     * O JSON começa depois dos
-     * 22 bytes do cabeçalho usado.
-     */
-
     const possibleJson =
         exif
             .subarray(22)
@@ -799,6 +782,7 @@ async function verifyStickerMetadata(
             JSON.parse(
                 possibleJson
             );
+
     } catch (
         error
     ) {
@@ -825,28 +809,21 @@ async function verifyStickerMetadata(
         ] ===
         expectedDescription;
 
-    const publisherOk =
-        metadata[
-            "sticker-pack-publisher"
-        ] ===
-        "rk da miis";
-
     const idOk =
         metadata[
             "sticker-pack-id"
         ] ===
         "com.rkdamirella.stickers";
 
-    console.log(
-        "[TESTE EXIF] Nome:",
-        nameOk
-            ? "✅ OK"
-            : "❌ ERRO"
-    );
+    const publisherRemoved =
+        !Object.prototype.hasOwnProperty.call(
+            metadata,
+            "sticker-pack-publisher"
+        );
 
     console.log(
-        "[TESTE EXIF] Autor:",
-        publisherOk
+        "[TESTE EXIF] Descrição:",
+        nameOk
             ? "✅ OK"
             : "❌ ERRO"
     );
@@ -858,18 +835,26 @@ async function verifyStickerMetadata(
             : "❌ ERRO"
     );
 
+    console.log(
+        "[TESTE EXIF] Autor removido:",
+        publisherRemoved
+            ? "✅ OK"
+            : "❌ AINDA EXISTE"
+    );
+
     const valid =
         nameOk &&
-        publisherOk &&
-        idOk;
+        idOk &&
+        publisherRemoved;
 
     if (valid) {
         console.log(
-            "[TESTE EXIF] ✅ METADADOS CONFIRMADOS NO WEBP."
+            "[TESTE EXIF] ✅ METADADOS CONFIRMADOS."
         );
+
     } else {
         console.error(
-            "[TESTE EXIF] ❌ METADADOS NÃO PASSARAM NO TESTE."
+            "[TESTE EXIF] ❌ TESTE DE METADADOS FALHOU."
         );
     }
 
@@ -881,7 +866,7 @@ async function verifyStickerMetadata(
 }
 
 // ============================================================
-// ADICIONAR METADADOS
+// APLICAR METADADOS
 // ============================================================
 
 async function setStickerMetadata(
@@ -935,10 +920,6 @@ async function setStickerMetadata(
         result.length,
         "bytes"
     );
-
-    // ========================================================
-    // TESTE AUTOMÁTICO
-    // ========================================================
 
     const verified =
         await verifyStickerMetadata(
@@ -1042,10 +1023,6 @@ app.post(
                 return;
             }
 
-            // ====================================================
-            // IDENTIFICAR USUÁRIO
-            // ====================================================
-
             const from =
                 message.from ||
                 message.from_user_id ||
@@ -1118,7 +1095,7 @@ app.post(
             }
 
             // ====================================================
-            // IMAGEM /FIG
+            // /FIG
             // ====================================================
 
             if (
@@ -1198,7 +1175,7 @@ app.post(
             }
 
             // ====================================================
-            // VÍDEO /GIF
+            // /GIF
             // ====================================================
 
             if (
@@ -1459,11 +1436,6 @@ app.post(
                             descricao
                         );
 
-                    /*
-                     * O upload só acontece depois
-                     * do teste EXIF passar.
-                     */
-
                     await sendSticker(
                         from,
                         finalSticker,
@@ -1510,7 +1482,7 @@ app.post(
             }
 
             // ====================================================
-            // /FIG
+            // /FIG SEM IMAGEM
             // ====================================================
 
             if (
@@ -1526,7 +1498,7 @@ app.post(
             }
 
             // ====================================================
-            // /GIF
+            // /GIF SEM VÍDEO
             // ====================================================
 
             if (
