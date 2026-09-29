@@ -50,16 +50,10 @@ const stats = {
 };
 
 // ============================================================
-// FIGURINHAS RECEBIDAS
+// FIGURINHAS
 // ============================================================
 
-// Guarda a relação:
-// ID da mensagem do WhatsApp -> ID da mídia da figurinha
-//
-// Isso permite que:
-// o usuário responda uma figurinha
-// e use /texto alguma coisa
-
+// ID da mensagem do WhatsApp -> dados da figurinha
 const stickerMessages = new Map();
 
 const MAX_STORED_STICKERS = 1000;
@@ -130,6 +124,15 @@ function registerSticker(type) {
 
 function rememberSticker(messageId, mediaId, animated) {
     if (!messageId || !mediaId) {
+        console.log(
+            "[STICKER] Não foi possível salvar:",
+            {
+                messageId,
+                mediaId,
+                animated
+            }
+        );
+
         return;
     }
 
@@ -139,7 +142,16 @@ function rememberSticker(messageId, mediaId, animated) {
         createdAt: Date.now()
     });
 
-    // Evita crescimento infinito da memória
+    console.log(
+        "[STICKER] Figurinha salva na memória:",
+        {
+            messageId,
+            mediaId,
+            animated: animated === true,
+            totalMemoria: stickerMessages.size
+        }
+    );
+
     if (stickerMessages.size > MAX_STORED_STICKERS) {
         const firstKey =
             stickerMessages.keys().next().value;
@@ -219,6 +231,11 @@ async function sendText(to, text) {
 // ============================================================
 
 async function downloadMedia(mediaId) {
+    console.log(
+        "[MEDIA] Buscando informações da mídia:",
+        mediaId
+    );
+
     const mediaInfo = await axios.get(
         `https://graph.facebook.com/v23.0/${mediaId}`,
         {
@@ -230,6 +247,16 @@ async function downloadMedia(mediaId) {
 
     const mediaUrl = mediaInfo.data.url;
 
+    if (!mediaUrl) {
+        throw new Error(
+            "A Meta não retornou uma URL para essa mídia."
+        );
+    }
+
+    console.log(
+        "[MEDIA] URL da mídia encontrada."
+    );
+
     const response = await axios.get(
         mediaUrl,
         {
@@ -240,7 +267,16 @@ async function downloadMedia(mediaId) {
         }
     );
 
-    return Buffer.from(response.data);
+    const buffer =
+        Buffer.from(response.data);
+
+    console.log(
+        "[MEDIA] Download concluído:",
+        buffer.length,
+        "bytes"
+    );
+
+    return buffer;
 }
 
 // ============================================================
@@ -248,6 +284,14 @@ async function downloadMedia(mediaId) {
 // ============================================================
 
 async function uploadMedia(buffer, mimeType) {
+    console.log(
+        "[UPLOAD] Enviando mídia:",
+        {
+            tamanho: buffer.length,
+            mimeType
+        }
+    );
+
     const form = new FormData();
 
     form.append(
@@ -275,6 +319,11 @@ async function uploadMedia(buffer, mimeType) {
         }
     );
 
+    console.log(
+        "[UPLOAD] Mídia enviada. ID:",
+        response.data.id
+    );
+
     return response.data.id;
 }
 
@@ -282,29 +331,60 @@ async function uploadMedia(buffer, mimeType) {
 // ENVIAR FIGURINHA
 // ============================================================
 
-async function sendSticker(to, stickerBuffer) {
-    const mediaId = await uploadMedia(
-        stickerBuffer,
-        "image/webp"
-    );
+async function sendSticker(
+    to,
+    stickerBuffer,
+    animated = false
+) {
+    // Primeiro envia a mídia para a Meta
+    const mediaId =
+        await uploadMedia(
+            stickerBuffer,
+            "image/webp"
+        );
 
-    const response = await axios.post(
-        `${GRAPH_URL}/messages`,
-        {
-            messaging_product: "whatsapp",
-            to,
-            type: "sticker",
-            sticker: {
-                id: mediaId
+    // Depois envia a figurinha para o usuário
+    const response =
+        await axios.post(
+            `${GRAPH_URL}/messages`,
+            {
+                messaging_product: "whatsapp",
+                to,
+                type: "sticker",
+                sticker: {
+                    id: mediaId
+                }
+            },
+            {
+                headers: {
+                    Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+                    "Content-Type": "application/json"
+                }
             }
-        },
+        );
+
+    const messageId =
+        response.data?.messages?.[0]?.id;
+
+    console.log(
+        "[STICKER] Figurinha enviada:",
         {
-            headers: {
-                Authorization: `Bearer ${WHATSAPP_TOKEN}`,
-                "Content-Type": "application/json"
-            }
+            messageId,
+            mediaId,
+            animated
         }
     );
+
+    // IMPORTANTE:
+    // Agora também guardamos as figurinhas
+    // criadas pelo próprio bot.
+    if (messageId && mediaId) {
+        rememberSticker(
+            messageId,
+            mediaId,
+            animated
+        );
+    }
 
     return response.data;
 }
@@ -314,24 +394,37 @@ async function sendSticker(to, stickerBuffer) {
 // ============================================================
 
 async function imageToSticker(buffer) {
-    return await sharp(buffer)
-        .resize(
-            512,
-            512,
-            {
-                fit: "contain",
-                background: {
-                    r: 0,
-                    g: 0,
-                    b: 0,
-                    alpha: 0
+    console.log(
+        "[FIG] Convertendo imagem para sticker..."
+    );
+
+    const result =
+        await sharp(buffer)
+            .resize(
+                512,
+                512,
+                {
+                    fit: "contain",
+                    background: {
+                        r: 0,
+                        g: 0,
+                        b: 0,
+                        alpha: 0
+                    }
                 }
-            }
-        )
-        .webp({
-            quality: 80
-        })
-        .toBuffer();
+            )
+            .webp({
+                quality: 80
+            })
+            .toBuffer();
+
+    console.log(
+        "[FIG] Sticker criado:",
+        result.length,
+        "bytes"
+    );
+
+    return result;
 }
 
 // ============================================================
@@ -410,6 +503,10 @@ async function videoToAnimatedSticker(buffer) {
     };
 
     try {
+        console.log(
+            "[GIF] Convertendo vídeo..."
+        );
+
         await runFFmpeg(
             10,
             45
@@ -424,6 +521,10 @@ async function videoToAnimatedSticker(buffer) {
             result.length >
             500 * 1024
         ) {
+            console.log(
+                "[GIF] Arquivo passou de 500 KB. Reduzindo qualidade..."
+            );
+
             await runFFmpeg(
                 8,
                 60
@@ -434,6 +535,12 @@ async function videoToAnimatedSticker(buffer) {
                     outputPath
                 );
         }
+
+        console.log(
+            "[GIF] Sticker animado criado:",
+            result.length,
+            "bytes"
+        );
 
         return result;
 
@@ -602,6 +709,52 @@ function createTextSvg(
 }
 
 // ============================================================
+// DETECTAR SE STICKER É ANIMADO
+// ============================================================
+
+async function detectStickerAnimated(buffer) {
+    console.log(
+        "[TEXTO] Detectando se a figurinha é animada..."
+    );
+
+    try {
+        const metadata =
+            await sharp(
+                buffer,
+                {
+                    animated: true
+                }
+            ).metadata();
+
+        console.log(
+            "[TEXTO] Metadata:",
+            {
+                format: metadata.format,
+                width: metadata.width,
+                height: metadata.height,
+                pages: metadata.pages,
+                pageHeight: metadata.pageHeight
+            }
+        );
+
+        return (
+            metadata.pages &&
+            metadata.pages > 1
+        );
+
+    } catch (error) {
+        console.error(
+            "[TEXTO] Erro ao analisar metadata:",
+            error.message
+        );
+
+        // Se não conseguir detectar,
+        // mantém o valor original salvo.
+        return false;
+    }
+}
+
+// ============================================================
 // TEXTO EM STICKER ESTÁTICO
 // ============================================================
 
@@ -609,6 +762,10 @@ async function addTextToStaticSticker(
     buffer,
     text
 ) {
+    console.log(
+        "[TEXTO] Processando sticker estático..."
+    );
+
     const metadata =
         await sharp(buffer)
             .metadata();
@@ -621,6 +778,13 @@ async function addTextToStaticSticker(
         metadata.height ||
         512;
 
+    console.log(
+        "[TEXTO] Dimensões:",
+        width,
+        "x",
+        height
+    );
+
     const svg =
         createTextSvg(
             text,
@@ -628,19 +792,28 @@ async function addTextToStaticSticker(
             height
         );
 
-    return await sharp(buffer)
-        .composite([
-            {
-                input:
-                    Buffer.from(svg),
-                top: 0,
-                left: 0
-            }
-        ])
-        .webp({
-            quality: 80
-        })
-        .toBuffer();
+    const result =
+        await sharp(buffer)
+            .composite([
+                {
+                    input:
+                        Buffer.from(svg),
+                    top: 0,
+                    left: 0
+                }
+            ])
+            .webp({
+                quality: 80
+            })
+            .toBuffer();
+
+    console.log(
+        "[TEXTO] Sticker estático finalizado:",
+        result.length,
+        "bytes"
+    );
+
+    return result;
 }
 
 // ============================================================
@@ -651,6 +824,10 @@ async function addTextToAnimatedSticker(
     buffer,
     text
 ) {
+    console.log(
+        "[TEXTO] Processando sticker animado..."
+    );
+
     const tempDir =
         await fs.promises.mkdtemp(
             path.join(
@@ -780,6 +957,10 @@ async function addTextToAnimatedSticker(
             result.length >
             500 * 1024
         ) {
+            console.log(
+                "[TEXTO] Sticker animado passou de 500 KB. Reduzindo qualidade..."
+            );
+
             await runFFmpeg(
                 65
             );
@@ -789,6 +970,12 @@ async function addTextToAnimatedSticker(
                     outputPath
                 );
         }
+
+        console.log(
+            "[TEXTO] Sticker animado finalizado:",
+            result.length,
+            "bytes"
+        );
 
         return result;
 
@@ -891,6 +1078,16 @@ app.post(
 
             registerUser(from);
 
+            console.log(
+                "[MESSAGE]",
+                {
+                    from,
+                    type: message.type,
+                    id: message.id,
+                    contextId: message.context?.id
+                }
+            );
+
             // ====================================================
             // RECEBEU UMA FIGURINHA
             // ====================================================
@@ -901,6 +1098,15 @@ app.post(
             ) {
                 const sticker =
                     message.sticker;
+
+                console.log(
+                    "[STICKER RECEBIDO]",
+                    {
+                        messageId: message.id,
+                        mediaId: sticker?.id,
+                        animated: sticker?.animated
+                    }
+                );
 
                 if (
                     sticker?.id
@@ -965,27 +1171,15 @@ app.post(
                             buffer
                         );
 
-                    const result =
-                        await sendSticker(
-                            from,
-                            sticker
-                        );
+                    await sendSticker(
+                        from,
+                        sticker,
+                        false
+                    );
 
                     registerSticker(
                         "fig"
                     );
-
-                    // Guarda a figurinha enviada pelo bot
-                    const sentMessageId =
-                        result?.messages?.[0]?.id;
-
-                    if (
-                        sentMessageId
-                    ) {
-                        // A mídia enviada pelo bot é a mesma que foi criada
-                        // localmente. Não precisamos dela para o /texto
-                        // caso o usuário responda à figurinha original.
-                    }
 
                 } catch (error) {
                     console.error(
@@ -1056,7 +1250,8 @@ app.post(
 
                     await sendSticker(
                         from,
-                        sticker
+                        sticker,
+                        true
                     );
 
                     registerSticker(
@@ -1106,8 +1301,6 @@ app.post(
                 lowerText ===
                 "/acessos"
             ) {
-
-                // Somente o desenvolvedor
                 if (
                     from !==
                     OWNER_NUMBER
@@ -1193,10 +1386,24 @@ app.post(
                 )
             ) {
 
+                console.log(
+                    "[TEXTO] ================================"
+                );
+
+                console.log(
+                    "[TEXTO] Comando recebido:",
+                    text
+                );
+
                 const textToAdd =
                     text
                         .slice(6)
                         .trim();
+
+                console.log(
+                    "[TEXTO] Texto a adicionar:",
+                    textToAdd
+                );
 
                 if (
                     !textToAdd
@@ -1211,13 +1418,21 @@ app.post(
                     return;
                 }
 
-                // ID da mensagem que o usuário está respondendo
                 const repliedMessageId =
                     message.context?.id;
+
+                console.log(
+                    "[TEXTO] Mensagem respondida:",
+                    repliedMessageId
+                );
 
                 if (
                     !repliedMessageId
                 ) {
+                    console.log(
+                        "[TEXTO] ERRO: não existe context.id"
+                    );
+
                     await sendText(
                         from,
                         `❌ Você precisa responder diretamente a uma figurinha.\n\n` +
@@ -1233,9 +1448,18 @@ app.post(
                         repliedMessageId
                     );
 
+                console.log(
+                    "[TEXTO] Figurinha encontrada na memória:",
+                    originalSticker
+                );
+
                 if (
                     !originalSticker
                 ) {
+                    console.log(
+                        "[TEXTO] ERRO: figurinha não encontrada na memória."
+                    );
+
                     await sendText(
                         from,
                         `❌ Não encontrei essa figurinha na memória do bot.\n\n` +
@@ -1246,9 +1470,18 @@ app.post(
                 }
 
                 try {
+                    console.log(
+                        "[TEXTO] Etapa 1: enviando mensagem de processamento..."
+                    );
+
                     await sendText(
                         from,
                         "⏳ Adicionando o texto na figurinha..."
+                    );
+
+                    console.log(
+                        "[TEXTO] Etapa 2: baixando mídia:",
+                        originalSticker.mediaId
                     );
 
                     const originalBuffer =
@@ -1256,17 +1489,52 @@ app.post(
                             originalSticker.mediaId
                         );
 
+                    console.log(
+                        "[TEXTO] Etapa 3: mídia baixada:",
+                        originalBuffer.length,
+                        "bytes"
+                    );
+
+                    console.log(
+                        "[TEXTO] Etapa 4: detectando animação..."
+                    );
+
+                    const detectedAnimated =
+                        await detectStickerAnimated(
+                            originalBuffer
+                        );
+
+                    const isAnimated =
+                        detectedAnimated ||
+                        originalSticker.animated === true;
+
+                    console.log(
+                        "[TEXTO] Tipo final:",
+                        isAnimated
+                            ? "ANIMADO"
+                            : "ESTÁTICO"
+                    );
+
                     let finalSticker;
 
                     if (
-                        originalSticker.animated
+                        isAnimated
                     ) {
+                        console.log(
+                            "[TEXTO] Etapa 5: adicionando texto com FFmpeg..."
+                        );
+
                         finalSticker =
                             await addTextToAnimatedSticker(
                                 originalBuffer,
                                 textToAdd
                             );
+
                     } else {
+                        console.log(
+                            "[TEXTO] Etapa 5: adicionando texto com Sharp..."
+                        );
+
                         finalSticker =
                             await addTextToStaticSticker(
                                 originalBuffer,
@@ -1274,18 +1542,50 @@ app.post(
                             );
                     }
 
+                    console.log(
+                        "[TEXTO] Etapa 6: resultado criado:",
+                        finalSticker.length,
+                        "bytes"
+                    );
+
+                    console.log(
+                        "[TEXTO] Etapa 7: enviando figurinha final..."
+                    );
+
                     await sendSticker(
                         from,
-                        finalSticker
+                        finalSticker,
+                        isAnimated
+                    );
+
+                    console.log(
+                        "[TEXTO] SUCESSO: figurinha enviada com texto."
                     );
 
                 } catch (error) {
+
                     console.error(
-                        "Erro no /texto:",
-                        error.response?.data ||
-                        error.message ||
-                        error
+                        "[TEXTO] ================= ERRO ================="
                     );
+
+                    console.error(
+                        "[TEXTO] message:",
+                        error.message
+                    );
+
+                    console.error(
+                        "[TEXTO] stack:",
+                        error.stack
+                    );
+
+                    if (
+                        error.response
+                    ) {
+                        console.error(
+                            "[TEXTO] API response:",
+                            error.response.data
+                        );
+                    }
 
                     await sendText(
                         from,
